@@ -9,7 +9,7 @@ Usage:
     cd superclip-recon
     python tests/run_tests.py
 
-Expected output: 10/10 tests passed (takes ~60s on CPU).
+Expected output: 12/12 tests passed (takes ~60s on CPU).
 """
 
 import os
