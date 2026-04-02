@@ -108,7 +108,6 @@ def run_retrieval_eval(model, cfg, device, max_images=5000):
 
     # Collect image embeddings
     all_image_embs = []
-    all_text_embs = []
 
     loader = DataLoader(val_dataset, batch_size=64, shuffle=False,
                         num_workers=cfg.data.num_workers)
@@ -124,13 +123,28 @@ def run_retrieval_eval(model, cfg, device, max_images=5000):
 
     all_image_embs = np.concatenate(all_image_embs, axis=0)[:max_images]
 
-    # Collect text embeddings (all 5 captions per image)
-    for img_id in tqdm(image_ids, desc="Eval (texts)"):
+    # Collect text embeddings (all 5 captions per image) — batched for speed
+    all_text_embs = []
+    text_batch_size = 256
+    pending_tokens = []
+
+    for img_id in image_ids:
         captions = img_id_to_caps.get(img_id, [])[:5]
         for cap in captions:
-            tok = model.tokenizer(cap).to(device)
-            txt_emb = model.encode_text(tok)
-            all_text_embs.append(txt_emb.cpu().numpy())
+            tok = model.tokenizer(cap).squeeze(0)   # [77] on CPU
+            pending_tokens.append(tok)
+
+            if len(pending_tokens) >= text_batch_size:
+                batch = torch.stack(pending_tokens).to(device)  # [B, 77]
+                txt_emb = model.encode_text(batch)
+                all_text_embs.append(txt_emb.cpu().numpy())
+                pending_tokens = []
+
+    # Flush remaining
+    if pending_tokens:
+        batch = torch.stack(pending_tokens).to(device)
+        txt_emb = model.encode_text(batch)
+        all_text_embs.append(txt_emb.cpu().numpy())
 
     all_text_embs = np.concatenate(all_text_embs, axis=0)
 

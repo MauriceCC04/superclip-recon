@@ -148,14 +148,10 @@ def train():
 
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{cfg.train.epochs}")
         for batch_idx, (images, token_ids, captions_raw, img_ids) in enumerate(pbar):
-            images = images.to(device)
-            token_ids = token_ids.to(device)
 
-            # --- Create masks for reconstruction ---
-            # Note: masked_token_ids is intentionally discarded (_) because the
-            # text encoder receives the original unmasked token_ids.  Only the
-            # mask_targets (ground-truth masked token IDs) are needed for the
-            # reconstruction loss.
+            # --- Create masks on CPU BEFORE moving to GPU ---
+            # Masking uses Python loops with .item() calls; doing this on CPU
+            # avoids thousands of GPU→CPU scalar transfers per batch.
             if args.variant == "B" and phrase_data is not None:
                 batch_img_ids = img_ids.tolist()
                 _, mask_targets, mask_positions = create_phrase_mask(
@@ -166,13 +162,22 @@ def train():
                     token_ids, cfg.model.mask_ratio, max_masks
                 )
 
-            # --- Forward ---
-            outputs = model(images, token_ids)
-
-            # --- Build token classification labels ---
+            # --- Build token classification labels on CPU ---
             token_cls_labels = build_token_labels(
                 token_ids, vocab_map, cfg.model.num_token_classes
             )
+
+            # --- Move everything to GPU ---
+            images = images.to(device)
+            token_ids = token_ids.to(device)
+            mask_targets = mask_targets.to(device)
+            token_cls_labels = token_cls_labels.to(device)
+
+            # --- Forward ---
+            # Note: the text encoder receives the original unmasked token_ids.
+            # Only mask_targets (ground-truth masked token IDs) are needed for
+            # the reconstruction loss.
+            outputs = model(images, token_ids)
 
             # --- Loss ---
             loss, losses_dict = total_loss(

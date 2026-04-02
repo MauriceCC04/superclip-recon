@@ -9,7 +9,10 @@ Grid:
     2. Masking rate sweep:  mask_ratio in {0.10, 0.15, 0.25} (Variant A, lambda=0.5)
     3. Variant comparison:  A vs B                            (lambda=0.5, mask_ratio=0.15)
 
-Total: ~8 training runs (some overlap, deduplicated below).
+Deduplication:
+    Experiments with identical (variant, lambda, mask_ratio) are merged
+    under one canonical name.  Results from prior main-experiment runs
+    (in --main_results_dir) are reused automatically.
 
 Usage:
     python run_ablations.py --coco_root ./data/coco --vocab_path ./vocab.json \
@@ -21,52 +24,83 @@ Usage:
 
 import os
 import json
+import shutil
 import subprocess
 import argparse
-from itertools import product
+
+
+# ─── Grid construction ───────────────────────────────────────────────────────
+
+def _config_key(variant, lam, mr):
+    """Canonical key for deduplication: (variant, lambda, mask_ratio)."""
+    return (variant, round(lam, 4), round(mr, 4))
 
 
 def build_experiment_grid():
     """
-    Build the ablation grid. Returns list of dicts, one per experiment.
-    Duplicates are removed by run_name.
+    Build the ablation grid.  Returns list of dicts, one per *unique*
+    (variant, lambda, mask_ratio) configuration.
     """
-    experiments = {}
+    seen_configs = {}  # config_key -> experiment dict
 
-    # --- 1. Lambda sweep (Variant A, mask_ratio=0.15) ---
-    for lam in [0.0, 0.1, 0.5, 1.0]:
-        name = f"lambda_{lam:.1f}"
-        experiments[name] = {
-            "run_name": name,
-            "variant": "A",
-            "lambda_recon": lam,
-            "mask_ratio": 0.15,
-        }
-
-    # --- 2. Masking rate sweep (Variant A, lambda=0.5) ---
-    for mr in [0.10, 0.15, 0.25]:
-        name = f"maskrate_{mr:.2f}"
-        if name not in experiments:  # avoid duplicate with lambda sweep
-            experiments[name] = {
+    def _add(name, variant, lam, mr):
+        key = _config_key(variant, lam, mr)
+        if key not in seen_configs:
+            seen_configs[key] = {
                 "run_name": name,
-                "variant": "A",
-                "lambda_recon": 0.5,
+                "variant": variant,
+                "lambda_recon": lam,
                 "mask_ratio": mr,
             }
 
+    # --- 1. Lambda sweep (Variant A, mask_ratio=0.15) ---
+    for lam in [0.0, 0.1, 0.5, 1.0]:
+        _add(f"lambda_{lam:.1f}", "A", lam, 0.15)
+
+    # --- 2. Masking rate sweep (Variant A, lambda=0.5) ---
+    for mr in [0.10, 0.15, 0.25]:
+        _add(f"maskrate_{mr:.2f}", "A", 0.5, mr)
+
     # --- 3. Variant A vs B (lambda=0.5, mask_ratio=0.15) ---
     for var in ["A", "B"]:
-        name = f"variant_{var}"
-        if name not in experiments:
-            experiments[name] = {
-                "run_name": name,
-                "variant": var,
-                "lambda_recon": 0.5,
-                "mask_ratio": 0.15,
-            }
+        _add(f"variant_{var}", var, 0.5, 0.15)
 
-    return list(experiments.values())
+    return list(seen_configs.values())
 
+
+# ─── Main-experiment reuse ───────────────────────────────────────────────────
+
+# Maps (variant, lambda, mask_ratio) → main-experiment result filename
+_MAIN_RUN_MAP = {
+    ("A", 0.0,  0.15): "baseline.json",
+    ("A", 0.5,  0.15): "variant_a.json",
+    ("B", 0.5,  0.15): "variant_b.json",
+}
+
+
+def try_reuse_main_result(exp, main_results_dir, ablation_results_dir):
+    """
+    If this ablation config matches a main experiment that already ran,
+    copy its result JSON into the ablation directory so we don't retrain.
+
+    Returns True if a result was reused, False otherwise.
+    """
+    key = _config_key(exp["variant"], exp["lambda_recon"], exp["mask_ratio"])
+    main_fname = _MAIN_RUN_MAP.get(key)
+    if main_fname is None:
+        return False
+
+    main_path = os.path.join(main_results_dir, main_fname)
+    if not os.path.isfile(main_path):
+        return False
+
+    dest_path = os.path.join(ablation_results_dir, f"{exp['run_name']}.json")
+    shutil.copy2(main_path, dest_path)
+    print(f"  Reused main result {main_fname} → {dest_path}")
+    return True
+
+
+# ─── Experiment runner ───────────────────────────────────────────────────────
 
 def run_single_experiment(exp, base_args):
     """Run one training experiment as a subprocess."""
@@ -148,6 +182,8 @@ def main():
     parser.add_argument("--vocab_path", type=str, default="./vocab.json")
     parser.add_argument("--phrase_path", type=str, default="./phrases.json")
     parser.add_argument("--results_dir", type=str, default="./results/ablations")
+    parser.add_argument("--main_results_dir", type=str, default="./results",
+                        help="Directory with main experiment results to reuse")
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-5)
@@ -160,7 +196,7 @@ def main():
     os.makedirs(os.path.join(args.results_dir, "checkpoints"), exist_ok=True)
 
     grid = build_experiment_grid()
-    print(f"Ablation grid: {len(grid)} experiments")
+    print(f"Ablation grid: {len(grid)} unique experiments")
     for exp in grid:
         print(f"  {exp['run_name']}: variant={exp['variant']} "
               f"lambda={exp['lambda_recon']} mask_ratio={exp['mask_ratio']}")
@@ -171,14 +207,24 @@ def main():
 
     # Run experiments
     failed = []
+    skipped = 0
+    reused = 0
     for i, exp in enumerate(grid):
-        print(f"\n>>> Experiment {i+1}/{len(grid)}")
-        # Skip if results already exist (resume support)
+        print(f"\n>>> Experiment {i+1}/{len(grid)}: {exp['run_name']}")
+
+        # Skip if ablation results already exist (resume support)
         results_path = os.path.join(args.results_dir, f"{exp['run_name']}.json")
         if os.path.exists(results_path):
             print(f"  Results already exist at {results_path}, skipping.")
+            skipped += 1
             continue
 
+        # Try to reuse a matching main-experiment result
+        if try_reuse_main_result(exp, args.main_results_dir, args.results_dir):
+            reused += 1
+            continue
+
+        # Train from scratch
         ret = run_single_experiment(exp, args)
         if ret != 0:
             print(f"  WARNING: {exp['run_name']} exited with code {ret}")
@@ -187,10 +233,16 @@ def main():
     # Collect and print summary
     summary = collect_results(args.results_dir)
 
+    trained = len(grid) - skipped - reused - len(failed)
+    print(f"\n  Grid size:  {len(grid)}")
+    print(f"  Trained:    {trained}")
+    print(f"  Reused:     {reused} (from main experiments)")
+    print(f"  Skipped:    {skipped} (already had results)")
+    print(f"  Failed:     {len(failed)}")
     if failed:
-        print(f"\nFailed experiments: {failed}")
+        print(f"  Failed runs: {failed}")
     else:
-        print(f"\nAll {len(grid)} experiments completed successfully.")
+        print(f"\nAll {len(grid)} experiments accounted for.")
 
 
 if __name__ == "__main__":

@@ -58,4 +58,10 @@ python extract_phrases.py --coco_root ./data/coco --output phrases.json
 
 mkdir -p out err logs checkpoints results
 
+echo ""
+echo "=== Setup complete: $(date) ==="
+echo ""
+echo "Next steps:"
+echo "  sbatch slurm/run_smoke.sh"
+echo "  sbatch slurm/run_main_experiments.sh"
 echo "  sbatch slurm/run_ablations.sh"
