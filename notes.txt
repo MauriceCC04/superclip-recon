@@ -1,3 +1,8 @@
+run tests:
+
+python tests/run_tests.py
+
+
 Partition: stud with MIG-sliced A100s (40GB slices) — plenty for this project
 GPU GRES: gpu:4g.40gb:1 (one 40GB MIG instance)
 Python: miniconda3 available via module system

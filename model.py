@@ -11,7 +11,8 @@ Architecture overview:
            │                              │
     ┌──────▼──────┐               ┌───────▼────────┐
     │  Token-Cls  │ (baseline)    │  Recon Head    │ (our contribution)
-    │  Linear     │               │  2-layer MLP   │
+    │  Linear     │               │  Shared MLP +  │
+    │             │               │  Slot Pos Emb  │
     └──────┬──────┘               └───────┬────────┘
            │                              │
     L_token_cls                     L_recon
@@ -19,6 +20,16 @@ Architecture overview:
            └──────────┬───────────────────┘
                       │
               L_total = L_tc + λ * L_recon
+
+Reconstruction head design:
+    For each masked slot k in [0, max_masks):
+        input  = concat(image_features, slot_embedding[k])
+        output = shared_mlp(input) → [vocab_size]
+
+    This is lightweight (~25M params vs ~304M in the naive version),
+    and the per-slot position embedding gives the head a signal about
+    *which* masked position it is predicting, enabling it to learn
+    ordered compositional structure rather than a bag-of-predictions.
 """
 
 import torch
@@ -51,7 +62,13 @@ class TokenClassificationHead(nn.Module):
 class ReconstructionHead(nn.Module):
     """
     Lightweight 2-layer MLP that predicts masked caption tokens
-    from image features.
+    from image features, with learned per-slot position embeddings.
+
+    Each masked slot gets its own position embedding, which is
+    concatenated with the image feature before passing through
+    a shared MLP. This gives the head a signal about *which*
+    masked position it is predicting (1st masked token, 2nd, etc.),
+    enabling ordered compositional predictions.
 
     Variant A (masked token prediction):
         Input:  image_features [B, D]
@@ -59,17 +76,31 @@ class ReconstructionHead(nn.Module):
 
     Variant B (phrase reconstruction):
         Same architecture, but trained on short noun-phrase token sequences.
+        Slot ordering naturally maps to phrase token ordering.
+
+    Parameter count:
+        slot_embeddings:  max_masks * slot_dim          (~768)
+        Linear 1:         (D + slot_dim) * hidden_dim   (~295K)
+        Linear 2:         hidden_dim * vocab_size        (~25.3M)
+        Total:            ~25.6M  (vs ~304M in naive approach)
     """
+
+    SLOT_DIM = 64  # dimensionality of learned slot position embeddings
 
     def __init__(self, embed_dim: int, hidden_dim: int, vocab_size: int, max_masks: int = 10):
         super().__init__()
         self.max_masks = max_masks
-        self.mlp = nn.Sequential(
-            nn.Linear(embed_dim, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, max_masks * vocab_size),
-        )
         self.vocab_size = vocab_size
+
+        # Learned position embedding per slot (slot 0 = "first masked token", etc.)
+        self.slot_embeddings = nn.Embedding(max_masks, self.SLOT_DIM)
+
+        # Shared MLP: (image_feat ‖ slot_embed) → vocab logits
+        self.mlp = nn.Sequential(
+            nn.Linear(embed_dim + self.SLOT_DIM, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, vocab_size),
+        )
 
     def forward(self, image_features: torch.Tensor) -> torch.Tensor:
         """
@@ -78,8 +109,21 @@ class ReconstructionHead(nn.Module):
         Returns:
             logits: [B, max_masks, vocab_size]
         """
-        out = self.mlp(image_features)                      # [B, max_masks * vocab_size]
-        return out.view(-1, self.max_masks, self.vocab_size) # [B, max_masks, vocab_size]
+        B = image_features.size(0)
+        device = image_features.device
+
+        # Slot position embeddings: [max_masks, slot_dim]
+        slot_ids = torch.arange(self.max_masks, device=device)
+        slot_embs = self.slot_embeddings(slot_ids)            # [max_masks, SLOT_DIM]
+
+        # Expand to batch: [B, max_masks, D] and [B, max_masks, SLOT_DIM]
+        img_exp = image_features.unsqueeze(1).expand(-1, self.max_masks, -1)
+        slot_exp = slot_embs.unsqueeze(0).expand(B, -1, -1)
+
+        # Concatenate and predict
+        combined = torch.cat([img_exp, slot_exp], dim=-1)     # [B, max_masks, D + SLOT_DIM]
+        logits = self.mlp(combined)                           # [B, max_masks, vocab_size]
+        return logits
 
 
 class SuperCLIPRecon(nn.Module):

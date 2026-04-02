@@ -152,14 +152,17 @@ def train():
             token_ids = token_ids.to(device)
 
             # --- Create masks for reconstruction ---
+            # Note: masked_token_ids is intentionally discarded (_) because the
+            # text encoder receives the original unmasked token_ids.  Only the
+            # mask_targets (ground-truth masked token IDs) are needed for the
+            # reconstruction loss.
             if args.variant == "B" and phrase_data is not None:
-                # img_ids comes directly from the dataset (shuffle-safe)
                 batch_img_ids = img_ids.tolist()
-                masked_token_ids, mask_targets, mask_positions = create_phrase_mask(
+                _, mask_targets, mask_positions = create_phrase_mask(
                     token_ids, phrase_data, batch_img_ids, max_masks
                 )
             else:
-                masked_token_ids, mask_targets, mask_positions = create_mask(
+                _, mask_targets, mask_positions = create_mask(
                     token_ids, cfg.model.mask_ratio, max_masks
                 )
 
