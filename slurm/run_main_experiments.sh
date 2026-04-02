@@ -64,4 +64,28 @@ python train.py \
     --results_file ./results/baseline.json
 
 echo "=== Variant A ==="
+python train.py \
+    --lambda_recon 0.5 \
+    --variant A \
+    --mask_ratio 0.15 \
+    --epochs 10 \
+    --batch_size 128 \
+    --lr 1e-5 \
+    --save_dir ./checkpoints/variant_a \
+    --run_name variant_a \
+    --results_file ./results/variant_a.json
+
+echo "=== Variant B ==="
+python train.py \
+    --lambda_recon 0.5 \
+    --variant B \
+    --mask_ratio 0.15 \
+    --epochs 10 \
+    --batch_size 128 \
+    --lr 1e-5 \
+    --phrase_path ./phrases.json \
+    --save_dir ./checkpoints/variant_b \
+    --run_name variant_b \
+    --results_file ./results/variant_b.json
+
 echo "=== Main experiments complete: $(date) ==="

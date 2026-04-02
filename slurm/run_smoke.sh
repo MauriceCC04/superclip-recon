@@ -44,7 +44,7 @@ echo "=== Sanity check ==="
 python sanity_check.py --coco_root ./data/coco --vocab_path ./vocab.json
 
 echo "=== Short smoke training + quick retrieval ==="
-python smoke_test.py \
+python tests/smoke_test.py \
     --coco_root ./data/coco \
     --vocab_path ./vocab.json \
     --steps 3 \
