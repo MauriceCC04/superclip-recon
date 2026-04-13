@@ -25,9 +25,19 @@ class ModelConfig:
     clip_pretrained: str = "openai"                 # pretrained weights source
     embed_dim: int = 512                            # CLIP embedding dimension
     # --- Token classification head (SuperCLIP baseline) ---
+    # NOTE: train.py overrides this at runtime with len(vocab_map) so the
+    # head always matches the actual vocabulary.  This default is only used
+    # by standalone scripts (sanity_check, tests) that don't load a vocab.
     num_token_classes: int = 1000                   # top-K COCO vocabulary tokens
     # --- Reconstruction head (our contribution) ---
     recon_hidden_dim: int = 512                     # hidden dim of 2-layer MLP
+    # recon_vocab_size controls the output dimension of the reconstruction
+    # head.  The default (49408) covers the full CLIP tokenizer vocabulary,
+    # which creates a ~25M-parameter output layer.  If GPU memory is tight
+    # or you want a stronger training signal, you can reduce this to the
+    # top 5K–10K tokens that actually appear in COCO captions and remap
+    # mask_targets accordingly in losses.py.  For the current project scope
+    # with 40GB GPU memory the full vocab is fine.
     recon_vocab_size: int = 49408                   # CLIP tokenizer vocab size
     mask_ratio: float = 0.15                        # fraction of caption tokens to mask
     variant: str = "A"                              # "A" = masked token, "B" = phrase recon
@@ -39,7 +49,7 @@ class TrainConfig:
     epochs: int = 10
     lr: float = 1e-5                                # fine-tuning LR (small)
     weight_decay: float = 0.01
-    warmup_steps: int = 500
+    warmup_steps: int = 500                         # linear warmup steps (used by scheduler)
     # --- Loss weights ---
     lambda_recon: float = 0.5                       # weight for L_recon
     # --- Logging ---

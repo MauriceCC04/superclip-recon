@@ -11,7 +11,11 @@ This is intentionally much smaller than train.py so it can be used as the
 first SLURM job before launching the full study.
 """
 
+# ── Ensure repo root is importable when launched as `python tests/smoke_test.py` ──
+import sys
 import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import json
 import time
 import argparse
@@ -95,6 +99,8 @@ def main():
     )
 
     vocab_map = load_vocab(args.vocab_path)
+    # Sync head size to actual vocab
+    cfg.model.num_token_classes = len(vocab_map)
     print(f"Loaded vocab with {len(vocab_map)} token classes")
 
     trainable_params = [p for p in model.parameters() if p.requires_grad]

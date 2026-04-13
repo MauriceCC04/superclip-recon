@@ -9,7 +9,7 @@ Usage:
     cd superclip-recon
     python tests/run_tests.py
 
-Expected output: 12/12 tests passed (takes ~60s on CPU).
+Expected output: 13/13 tests passed (takes ~60s on CPU).
 """
 
 import os
@@ -190,7 +190,7 @@ def test_mask_variant_a():
                 assert masked[i, pos].item() == 0, "Masked position not zeroed"
 
 
-@test("7. Masking — Variant B (phrase masking)")
+@test("7. Masking — Variant B (phrase masking, image-level)")
 def test_mask_variant_b():
     from losses import create_phrase_mask
     import open_clip
@@ -222,6 +222,55 @@ def test_mask_variant_b():
     assert targets.shape == (4, 12)
     n_masked = (targets != 0).sum().item()
     assert n_masked > 0, "No phrase tokens were masked"
+
+
+@test("7b. Masking — Variant B (per-caption inline extraction)")
+def test_mask_variant_b_inline():
+    """Test the new create_phrase_mask_from_captions that extracts phrases
+    directly from the current caption, fixing the alignment problem."""
+    from losses import create_phrase_mask_from_captions
+    import open_clip
+
+    tokenizer = open_clip.get_tokenizer("ViT-B-32")
+
+    captions = [
+        "a red car parked on the street",
+        "two black dogs playing in the park",
+        "a woman riding a brown horse",
+        "the tall building near the river",
+    ]
+
+    token_ids = torch.cat([tokenizer(c) for c in captions], dim=0)  # [4, 77]
+    assert token_ids.shape == (4, 77)
+
+    masked, targets, positions = create_phrase_mask_from_captions(
+        token_ids, captions, tokenizer, max_masks=12
+    )
+
+    assert masked.shape == (4, 77)
+    assert targets.shape == (4, 12)
+    assert positions.shape == (4, 12)
+
+    n_masked = (targets != 0).sum().item()
+    assert n_masked > 0, "No tokens masked by inline phrase extraction"
+
+    # Verify that masked positions were actually zeroed out
+    for i in range(4):
+        for k in range(12):
+            pos = positions[i, k].item()
+            if pos >= 0:
+                assert masked[i, pos].item() == 0, \
+                    f"Position {pos} in sample {i} was not zeroed"
+
+    # Verify targets match original token IDs (not some other caption's tokens)
+    for i in range(4):
+        for k in range(12):
+            pos = positions[i, k].item()
+            if pos >= 0:
+                assert targets[i, k].item() == token_ids[i, pos].item(), \
+                    f"Target mismatch at sample {i}, slot {k}"
+
+    print(f"  Masked {n_masked} tokens across 4 samples via inline extraction")
 
 
 @test("8. Loss computation + backward")
