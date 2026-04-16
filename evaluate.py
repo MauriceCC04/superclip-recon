@@ -17,9 +17,6 @@ def compute_retrieval_metrics(image_embs, text_embs, ks=(1, 5, 10)):
     """
     Compute image→text and text→image retrieval recall.
 
-    For COCO: each image has 5 captions. We evaluate on the standard
-    5K val set where text_embs has 5x the rows of image_embs.
-
     Args:
         image_embs: [N, D] numpy array
         text_embs:  [N*5, D] numpy array (5 captions per image)
@@ -29,25 +26,19 @@ def compute_retrieval_metrics(image_embs, text_embs, ks=(1, 5, 10)):
         dict with i2t_r1, i2t_r5, i2t_r10, t2i_r1, t2i_r5, t2i_r10
     """
     N = image_embs.shape[0]
-    n_captions_per_image = text_embs.shape[0] // N  # typically 5
+    n_captions_per_image = text_embs.shape[0] // N
 
-    # Similarity matrix: [N, N*5]
     sims = image_embs @ text_embs.T
 
-    # --- Image → Text retrieval ---
     i2t_ranks = []
     for i in range(N):
-        # Ground truth caption indices for image i
         gt_indices = list(range(i * n_captions_per_image, (i + 1) * n_captions_per_image))
-        # Rank all texts by similarity
         sorted_indices = np.argsort(-sims[i])
-        # Find best rank among ground truth captions
         rank = min(np.where(np.isin(sorted_indices, gt_indices))[0])
         i2t_ranks.append(rank)
 
-    # --- Text → Image retrieval ---
     t2i_ranks = []
-    sims_t2i = text_embs @ image_embs.T  # [N*5, N]
+    sims_t2i = text_embs @ image_embs.T
     for j in range(text_embs.shape[0]):
         gt_image = j // n_captions_per_image
         sorted_indices = np.argsort(-sims_t2i[j])
@@ -89,8 +80,6 @@ def run_retrieval_eval(model, cfg, device, max_images=5000):
         tokenizer=model.tokenizer,
     )
 
-    # For retrieval we need all 5 captions per image.
-    # We'll iterate manually to collect them.
     import json, os
     ann_path = os.path.join(cfg.data.coco_root, cfg.data.val_ann)
     with open(ann_path) as f:
@@ -103,10 +92,8 @@ def run_retrieval_eval(model, cfg, device, max_images=5000):
             img_id_to_caps[iid] = []
         img_id_to_caps[iid].append(ann["caption"])
 
-    # Use the same image ordering as the dataset
     image_ids = val_dataset.image_ids[:max_images]
 
-    # Collect image embeddings
     all_image_embs = []
 
     loader = DataLoader(val_dataset, batch_size=64, shuffle=False,
@@ -123,7 +110,6 @@ def run_retrieval_eval(model, cfg, device, max_images=5000):
 
     all_image_embs = np.concatenate(all_image_embs, axis=0)[:max_images]
 
-    # Collect text embeddings (all 5 captions per image) — batched for speed
     all_text_embs = []
     text_batch_size = 256
     pending_tokens = []
@@ -131,16 +117,15 @@ def run_retrieval_eval(model, cfg, device, max_images=5000):
     for img_id in image_ids:
         captions = img_id_to_caps.get(img_id, [])[:5]
         for cap in captions:
-            tok = model.tokenizer(cap).squeeze(0)   # [77] on CPU
+            tok = model.tokenizer(cap).squeeze(0)
             pending_tokens.append(tok)
 
             if len(pending_tokens) >= text_batch_size:
-                batch = torch.stack(pending_tokens).to(device)  # [B, 77]
+                batch = torch.stack(pending_tokens).to(device)
                 txt_emb = model.encode_text(batch)
                 all_text_embs.append(txt_emb.cpu().numpy())
                 pending_tokens = []
 
-    # Flush remaining
     if pending_tokens:
         batch = torch.stack(pending_tokens).to(device)
         txt_emb = model.encode_text(batch)
@@ -148,14 +133,12 @@ def run_retrieval_eval(model, cfg, device, max_images=5000):
 
     all_text_embs = np.concatenate(all_text_embs, axis=0)
 
-    # Compute metrics
     metrics = compute_retrieval_metrics(all_image_embs, all_text_embs)
     model.train()
     return metrics
 
 
 if __name__ == "__main__":
-    """Quick test: evaluate a checkpoint."""
     import argparse
     from config import Config
     from model import SuperCLIPRecon

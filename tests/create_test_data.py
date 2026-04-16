@@ -19,7 +19,6 @@ import random
 from PIL import Image
 
 
-# Fake captions with compositional structure (for testing phrase extraction too)
 FAKE_CAPTIONS = [
     "a red car parked on the street",
     "two black dogs playing in the park",
@@ -58,7 +57,6 @@ def create_test_data(root="test_data/coco", n_train=16, n_val=8, captions_per_im
             img_id = i + 1 + (0 if split == "train" else 1000)
             filename = f"{img_id:012d}.jpg"
 
-            # Create a small random image (64x64 is enough)
             img = Image.new("RGB", (64, 64),
                             color=(random.randint(0, 255),
                                    random.randint(0, 255),
@@ -72,7 +70,6 @@ def create_test_data(root="test_data/coco", n_train=16, n_val=8, captions_per_im
                 "width": 64,
             })
 
-            # Add multiple captions per image
             for j in range(captions_per_image):
                 cap = random.choice(FAKE_CAPTIONS)
                 annotations.append({

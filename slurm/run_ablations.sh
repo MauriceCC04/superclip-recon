@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=superclip-ablate
+#SBATCH --job-name=superclip-ablate-chained
 #SBATCH --account=3202029
 #SBATCH --partition=stud
 #SBATCH --qos=stud
@@ -12,38 +12,27 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 
-# Ablation sweep only.
-# Run this separately from the main experiments.
+# ============================================================
+# LEGACY CHAINED ABLATION RUNNER
+#
+# **Preferred** workflow on this cluster is to use
+# slurm/submit_ablations.sh which submits each ablation as an
+# independent job.
+#
+# Keeping this only for local-style use of run_ablations.py with
+# its main-result reuse logic.
+# ============================================================
 
 set -euo pipefail
 
-cd "${SLURM_SUBMIT_DIR:-$PWD}"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
+cd "$PROJECT_ROOT"
 
-echo "=== Ablation job started: $(date) ==="
-echo "Node: $(hostname)"
-echo "Job ID: $SLURM_JOB_ID"
+print_job_header
+activate_env
 
-module load miniconda3
-if command -v conda >/dev/null 2>&1; then
-    eval "$(conda shell.bash hook)"
-else
-    echo "ERROR: conda not available after module load"
-    exit 1
-fi
-conda activate superclip
-
-if [ ! -d "data/coco/train2017" ]; then
-    echo "ERROR: COCO data not found. Run bash slurm/setup_env_ready.sh first."
-    exit 1
-fi
-if [ ! -f "vocab.json" ]; then
-    echo "ERROR: vocab.json not found. Run bash slurm/setup_env_ready.sh first."
-    exit 1
-fi
-if [ ! -f "phrases.json" ]; then
-    echo "ERROR: phrases.json not found. Run bash slurm/setup_env_ready.sh first."
-    exit 1
-fi
+ensure_data_file "data/coco/train2017"
+ensure_data_file "vocab.json"
 
 mkdir -p results/ablations
 
@@ -51,6 +40,8 @@ python run_ablations.py \
     --coco_root ./data/coco \
     --vocab_path ./vocab.json \
     --phrase_path ./phrases.json \
-    --results_dir ./results/ablations
+    --results_dir ./results/ablations \
+    --main_results_dir ./results \
+    --epochs 5
 
-echo "=== Ablation job complete: $(date) ==="
+echo "=== Ablations complete: $(date) ==="

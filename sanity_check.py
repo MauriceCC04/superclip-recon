@@ -12,7 +12,7 @@ What it checks:
     4. Masking produces valid outputs
     5. Forward pass produces expected shapes
     6. Loss computes and backprop runs without error
-    7. Retrieval eval pipeline runs (on tiny subset)
+    7. Similarity matrix shape check (NOT a real retrieval evaluation)
 """
 
 import torch
@@ -36,6 +36,12 @@ def main():
     cfg = Config()
     cfg.data.coco_root = args.coco_root
 
+    # --- Load vocab FIRST and sync config before model creation ---
+    print("\n[0/7] Loading vocab and syncing config...")
+    vocab_map = load_vocab(args.vocab_path)
+    cfg.model.num_token_classes = len(vocab_map)
+    print(f"  Synced num_token_classes = {cfg.model.num_token_classes}")
+
     # --- 1. Model ---
     print("\n[1/7] Loading model...")
     model = SuperCLIPRecon(cfg).to(device)
@@ -56,18 +62,16 @@ def main():
     from torch.utils.data import DataLoader
     loader = DataLoader(dataset, batch_size=4, shuffle=True, num_workers=0)
     images, token_ids, captions, img_ids = next(iter(loader))
-    print(f"  images: {images.shape}")         # [4, 3, 224, 224]
-    print(f"  token_ids: {token_ids.shape}")    # [4, 77]
+    print(f"  images: {images.shape}")
+    print(f"  token_ids: {token_ids.shape}")
     print(f"  caption[0]: {captions[0][:80]}...")
     print(f"  img_ids[0]: {img_ids[0].item()}")
     print("  ✓ Dataset works")
 
     # --- 3. Vocab ---
-    print("\n[3/7] Loading vocab...")
-    vocab_map = load_vocab(args.vocab_path)
-    print(f"  {len(vocab_map)} token classes")
+    print("\n[3/7] Building token labels...")
     labels = build_token_labels(token_ids, vocab_map, cfg.model.num_token_classes)
-    print(f"  labels shape: {labels.shape}")    # [4, 1000]
+    print(f"  labels shape: {labels.shape}")
     print(f"  avg labels per sample: {labels.sum(dim=1).mean():.1f}")
     print("  ✓ Vocab + labels work")
 
@@ -75,7 +79,7 @@ def main():
     print("\n[4/7] Testing masking...")
     max_masks = int(cfg.data.max_caption_length * cfg.model.mask_ratio) + 1
     masked_ids, mask_targets, mask_pos = create_mask(token_ids, cfg.model.mask_ratio, max_masks)
-    print(f"  mask_targets: {mask_targets.shape}")  # [4, max_masks]
+    print(f"  mask_targets: {mask_targets.shape}")
     print(f"  non-zero targets: {(mask_targets != 0).sum().item()}")
     print("  ✓ Masking works")
 
@@ -105,16 +109,18 @@ def main():
     loss.backward()
     print("  ✓ Backward pass works")
 
-    # --- 7. Quick shape check for eval ---
-    print("\n[7/7] Quick eval shape check...")
+    # --- 7. Quick shape check (NOT a real retrieval evaluation) ---
+    print("\n[7/7] Quick similarity matrix shape check...")
+    print("  NOTE: This only verifies encode_image/encode_text produce")
+    print("  compatible shapes. It does NOT test the full retrieval pipeline.")
+    print("  Use tests/smoke_test.py or run_retrieval_eval() for that.")
     model.eval()
     with torch.no_grad():
         img_emb = model.encode_image(images)
         txt_emb = model.encode_text(token_ids)
         sim = img_emb @ txt_emb.T
-        print(f"  similarity matrix: {sim.shape}")  # [4, 4]
-        print(f"  diagonal (should be highest per row): {sim.diag().tolist()}")
-    print("  ✓ Eval pipeline works")
+        print(f"  similarity matrix: {sim.shape}")
+    print("  ✓ Embedding shapes are compatible")
 
     print("\n" + "="*50)
     print("ALL SANITY CHECKS PASSED")

@@ -27,7 +27,10 @@ from torch.utils.data import DataLoader
 from config import Config
 from dataset import COCOCaptionsDataset
 from model import SuperCLIPRecon
-from losses import build_token_labels, create_mask, total_loss
+from losses import (
+    build_token_labels, create_mask,
+    create_phrase_mask_from_captions, total_loss,
+)
 from build_vocab import load_vocab
 from evaluate import run_retrieval_eval
 
@@ -49,6 +52,7 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--mask_ratio", type=float, default=0.15)
     parser.add_argument("--lambda_recon", type=float, default=0.5)
+    parser.add_argument("--variant", type=str, default="A", choices=["A", "B"])
     parser.add_argument("--eval_images", type=int, default=64,
                         help="Small retrieval eval subset for speed")
     parser.add_argument("--save_path", type=str,
@@ -71,6 +75,7 @@ def main():
     cfg.data.coco_root = args.coco_root
     cfg.data.num_workers = 0
     cfg.model.mask_ratio = args.mask_ratio
+    cfg.model.variant = args.variant
     cfg.train.lambda_recon = args.lambda_recon
     cfg.train.batch_size = args.batch_size
     cfg.train.lr = args.lr
@@ -78,6 +83,13 @@ def main():
     cfg.train.run_name = "smoke_test"
     cfg.train.save_dir = os.path.dirname(args.save_path) or "."
 
+    # --- Vocab FIRST so we sync head size before the model is built ---
+    vocab_map = load_vocab(args.vocab_path)
+    cfg.model.num_token_classes = len(vocab_map)
+    print(f"Loaded vocab with {len(vocab_map)} token classes "
+          f"(num_token_classes synced to {cfg.model.num_token_classes})")
+
+    # --- Model (now built with correct head size) ---
     model = SuperCLIPRecon(cfg).to(device)
     n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Trainable params: {n_trainable:,}")
@@ -98,11 +110,6 @@ def main():
         drop_last=False,
     )
 
-    vocab_map = load_vocab(args.vocab_path)
-    # Sync head size to actual vocab
-    cfg.model.num_token_classes = len(vocab_map)
-    print(f"Loaded vocab with {len(vocab_map)} token classes")
-
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(
         trainable_params,
@@ -115,6 +122,10 @@ def main():
     os.makedirs(os.path.dirname(args.save_path) or ".", exist_ok=True)
     os.makedirs(os.path.dirname(args.results_file) or ".", exist_ok=True)
 
+    # --- Track GPU peak memory for the smoke JSON ---
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
+
     model.train()
     step_logs = []
     steps_run = 0
@@ -124,15 +135,28 @@ def main():
         if steps_run >= args.steps:
             break
 
-        images = images.to(device)
-        token_ids = token_ids.to(device)
+        # --- CPU-side masking (mirrors train.py — fixes the original GPU-masking bug) ---
+        if args.variant == "B":
+            _, mask_targets, _ = create_phrase_mask_from_captions(
+                token_ids, captions_raw, model.tokenizer, max_masks
+            )
+        else:
+            _, mask_targets, _ = create_mask(
+                token_ids, cfg.model.mask_ratio, max_masks
+            )
 
-        _, mask_targets, _ = create_mask(token_ids, cfg.model.mask_ratio, max_masks)
-        outputs = model(images, token_ids)
-
+        # --- CPU-side label build ---
         token_cls_labels = build_token_labels(
             token_ids, vocab_map, cfg.model.num_token_classes
         )
+
+        # --- Move everything to GPU ---
+        images = images.to(device)
+        token_ids = token_ids.to(device)
+        mask_targets = mask_targets.to(device)
+        token_cls_labels = token_cls_labels.to(device)
+
+        outputs = model(images, token_ids, encode_text=False)
 
         loss, loss_dict = total_loss(
             token_cls_logits=outputs["token_cls_logits"],
@@ -166,20 +190,24 @@ def main():
     if steps_run == 0:
         raise RuntimeError("Smoke test ran zero optimizer steps.")
 
+    # --- Save tiny checkpoint (no optimizer state — keep it small) ---
     torch.save(
         {
             "smoke_steps": steps_run,
             "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
             "config": cfg,
             "last_losses": last_loss_dict,
         },
         args.save_path,
     )
-    print(f"Saved smoke checkpoint to {args.save_path}")
+    ckpt_size_mb = os.path.getsize(args.save_path) / (1024 * 1024)
+    print(f"Saved smoke checkpoint to {args.save_path} ({ckpt_size_mb:.1f} MB)")
 
-    print("Running quick retrieval evaluation...")
+    # --- Tiny retrieval eval ---
+    eval_start = time.time()
+    print(f"Running quick retrieval evaluation (max_images={args.eval_images})...")
     metrics = run_retrieval_eval(model, cfg, device, max_images=args.eval_images)
+    eval_seconds = time.time() - eval_start
     print(
         f"I->T: R@1={metrics['i2t_r1']:.2f} "
         f"R@5={metrics['i2t_r5']:.2f} "
@@ -191,9 +219,15 @@ def main():
         f"R@10={metrics['t2i_r10']:.2f}"
     )
 
+    gpu_peak_gb = None
+    if device.type == "cuda":
+        gpu_peak_gb = torch.cuda.max_memory_allocated(device) / (1024 ** 3)
+        print(f"GPU peak memory: {gpu_peak_gb:.2f} GB")
+
     wall_time = time.time() - wall_start
     results = {
         "run_name": "smoke_test",
+        "variant": args.variant,
         "steps": steps_run,
         "batch_size": args.batch_size,
         "lr": args.lr,
@@ -202,6 +236,9 @@ def main():
         "seed": args.seed,
         "trainable_params": n_trainable,
         "wall_time_seconds": round(wall_time, 1),
+        "eval_seconds": round(eval_seconds, 1),
+        "gpu_peak_mem_gb": round(gpu_peak_gb, 3) if gpu_peak_gb is not None else None,
+        "checkpoint_size_mb": round(ckpt_size_mb, 1),
         "step_logs": step_logs,
         "retrieval": metrics,
         "checkpoint": args.save_path,

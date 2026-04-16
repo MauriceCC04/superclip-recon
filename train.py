@@ -13,6 +13,10 @@ Usage:
 
     # Save results to file (for ablation analysis):
     python train.py --lambda_recon 0.5 --results_file ./results/run1.json
+
+    # HPC-safe settings:
+    python train.py --save_strategy last_and_best --keep_last_k 2 \
+                    --no_save_optimizer --eval_max_images 1000
 """
 
 import os
@@ -20,6 +24,7 @@ import json
 import time
 import argparse
 import random
+import glob
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
@@ -47,7 +52,6 @@ def set_seed(seed: int):
 def build_warmup_scheduler(optimizer, warmup_steps: int, total_steps: int):
     """
     Linear warmup for `warmup_steps`, then linear decay to 0 over the rest.
-    If warmup_steps <= 0 or total_steps <= warmup_steps, returns constant LR.
     """
     if warmup_steps <= 0:
         return LambdaLR(optimizer, lr_lambda=lambda _: 1.0)
@@ -55,13 +59,57 @@ def build_warmup_scheduler(optimizer, warmup_steps: int, total_steps: int):
     def lr_lambda(current_step):
         if current_step < warmup_steps:
             return float(current_step) / float(max(1, warmup_steps))
-        # Linear decay after warmup
         remaining = total_steps - warmup_steps
         if remaining <= 0:
             return 1.0
         return max(0.0, float(total_steps - current_step) / float(remaining))
 
     return LambdaLR(optimizer, lr_lambda=lr_lambda)
+
+
+# ─── Checkpoint retention ────────────────────────────────────────────────────
+
+def manage_checkpoints(save_dir, save_strategy, keep_last_k, current_epoch,
+                       best_metric_epoch):
+    """
+    Delete old checkpoints according to retention policy.
+
+    save_strategy:
+        all            — keep every epoch checkpoint
+        last           — keep only the latest checkpoint
+        best           — keep only the best checkpoint
+        last_and_best  — keep latest + best (default, safest for HPC)
+
+    keep_last_k: when > 0, also keep the most recent K checkpoints
+                 regardless of strategy (extra safety net).
+    """
+    if save_strategy == "all":
+        return  # keep everything
+
+    ckpt_files = sorted(glob.glob(os.path.join(save_dir, "epoch_*.pt")))
+    if not ckpt_files:
+        return
+
+    keep = set()
+
+    # Always keep current epoch
+    current_path = os.path.join(save_dir, f"epoch_{current_epoch}.pt")
+    keep.add(current_path)
+
+    # Keep best if strategy includes it
+    if save_strategy in ("best", "last_and_best") and best_metric_epoch is not None:
+        best_path = os.path.join(save_dir, f"epoch_{best_metric_epoch}.pt")
+        keep.add(best_path)
+
+    # Keep last K
+    if keep_last_k > 0:
+        for p in ckpt_files[-keep_last_k:]:
+            keep.add(p)
+
+    # Delete the rest
+    for p in ckpt_files:
+        if p not in keep and os.path.isfile(p):
+            os.remove(p)
 
 
 def parse_args():
@@ -82,6 +130,21 @@ def parse_args():
                         help="Path to phrases.json (optional; Variant B extracts phrases inline)")
     parser.add_argument("--use_wandb", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
+    # --- Checkpoint retention (HPC safety) ---
+    parser.add_argument("--save_strategy", type=str, default="last_and_best",
+                        choices=["all", "last", "best", "last_and_best"],
+                        help="Checkpoint retention strategy (default: last_and_best)")
+    parser.add_argument("--keep_last_k", type=int, default=2,
+                        help="Also keep the K most recent checkpoints (0 to disable)")
+    parser.add_argument("--save_optimizer_state", action="store_true", default=False,
+                        help="Include optimizer state in checkpoints (doubles size)")
+    # --- Eval cost controls ---
+    parser.add_argument("--eval_every_epoch", type=int, default=1,
+                        help="Run retrieval eval every N epochs (default: 1)")
+    parser.add_argument("--eval_max_images", type=int, default=5000,
+                        help="Max images for retrieval eval (default: 5000 = full COCO val)")
+    parser.add_argument("--skip_eval", action="store_true",
+                        help="Skip retrieval evaluation entirely")
     return parser.parse_args()
 
 
@@ -102,16 +165,19 @@ def train():
     cfg.train.run_name = args.run_name
     cfg.train.use_wandb = args.use_wandb
     cfg.train.seed = args.seed
+    cfg.train.eval_every_epoch = args.eval_every_epoch
 
     set_seed(cfg.train.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
     print(f"Run: {args.run_name} | variant={args.variant} | "
           f"lambda={args.lambda_recon} | mask_ratio={args.mask_ratio}")
+    print(f"Checkpoint strategy: {args.save_strategy} | keep_last_k={args.keep_last_k} | "
+          f"save_optimizer={args.save_optimizer_state}")
 
     # --- Vocab (load early so we can set head size before model creation) ---
     vocab_map = load_vocab(args.vocab_path)
-    cfg.model.num_token_classes = len(vocab_map)        # ← Fix 4
+    cfg.model.num_token_classes = len(vocab_map)
     print(f"Loaded vocab with {len(vocab_map)} token classes "
           f"(num_token_classes set to {cfg.model.num_token_classes})")
 
@@ -138,9 +204,6 @@ def train():
     )
 
     # --- Phrase data for Variant B ---
-    # phrase_data is still loaded for fallback / reference, but the primary
-    # masking path now extracts phrases directly from the current caption
-    # (see create_phrase_mask_from_captions in losses.py — Fix 3).
     phrase_data = None
     if args.variant == "B":
         if args.phrase_path is not None and os.path.isfile(args.phrase_path):
@@ -158,7 +221,7 @@ def train():
         trainable_params, lr=cfg.train.lr, weight_decay=cfg.train.weight_decay
     )
 
-    # --- Warmup scheduler (Fix 2) ---
+    # --- Warmup scheduler ---
     steps_per_epoch = len(train_loader)
     total_steps = steps_per_epoch * cfg.train.epochs
     scheduler = build_warmup_scheduler(optimizer, cfg.train.warmup_steps, total_steps)
@@ -178,8 +241,10 @@ def train():
 
     # --- Training loop ---
     os.makedirs(cfg.train.save_dir, exist_ok=True)
-    history = []  # per-epoch records for results file
+    history = []
     global_step = 0
+    best_metric_epoch = None
+    best_metric_val = -1.0
 
     for epoch in range(cfg.train.epochs):
         model.train()
@@ -190,12 +255,7 @@ def train():
         for batch_idx, (images, token_ids, captions_raw, img_ids) in enumerate(pbar):
 
             # --- Create masks on CPU BEFORE moving to GPU ---
-            # Masking uses Python loops with .item() calls; doing this on CPU
-            # avoids thousands of GPU→CPU scalar transfers per batch.
             if args.variant == "B":
-                # Fix 3: extract phrases from the CURRENT caption, not from
-                # the image-level pool.  This ensures the phrase is always
-                # present in the token sequence we are trying to mask.
                 _, mask_targets, mask_positions = create_phrase_mask_from_captions(
                     token_ids, captions_raw, model.tokenizer, max_masks
                 )
@@ -215,12 +275,8 @@ def train():
             mask_targets = mask_targets.to(device)
             token_cls_labels = token_cls_labels.to(device)
 
-            # --- Forward ---
-            # Note: the text encoder receives the original unmasked token_ids.
-            # Only mask_targets (ground-truth masked token IDs) are needed for
-            # the reconstruction loss.  text_features are not used in the loss
-            # but are computed by the frozen text encoder at negligible cost.
-            outputs = model(images, token_ids)
+            # --- Forward (skip text encoding during training — not needed for loss) ---
+            outputs = model(images, token_ids, encode_text=False)
 
             # --- Loss ---
             loss, losses_dict = total_loss(
@@ -236,7 +292,7 @@ def train():
             loss.backward()
             torch.nn.utils.clip_grad_norm_(trainable_params, max_norm=1.0)
             optimizer.step()
-            scheduler.step()          # ← Fix 2: advance LR schedule each step
+            scheduler.step()
             global_step += 1
 
             # --- Logging ---
@@ -264,33 +320,52 @@ def train():
               f"tc={avg['l_token_cls']:.4f}  rc={avg['l_recon']:.4f}  total={avg['l_total']:.4f}")
 
         # --- Save checkpoint ---
-        ckpt_path = os.path.join(cfg.train.save_dir, f"epoch_{epoch+1}.pt")
-        torch.save({
+        ckpt_data = {
             "epoch": epoch + 1,
             "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "scheduler_state_dict": scheduler.state_dict(),
             "config": cfg,
             "avg_losses": avg,
-        }, ckpt_path)
-        print(f"Saved checkpoint: {ckpt_path}")
+        }
+        if args.save_optimizer_state:
+            ckpt_data["optimizer_state_dict"] = optimizer.state_dict()
+            ckpt_data["scheduler_state_dict"] = scheduler.state_dict()
+
+        ckpt_path = os.path.join(cfg.train.save_dir, f"epoch_{epoch+1}.pt")
+        torch.save(ckpt_data, ckpt_path)
+        ckpt_size_mb = os.path.getsize(ckpt_path) / (1024 * 1024)
+        print(f"Saved checkpoint: {ckpt_path} ({ckpt_size_mb:.1f} MB)")
 
         # --- Evaluation ---
         epoch_record = {"epoch": epoch + 1, "losses": avg}
-        if (epoch + 1) % cfg.train.eval_every_epoch == 0:
-            print("Running retrieval evaluation...")
-            metrics = run_retrieval_eval(model, cfg, device)
+        if not args.skip_eval and (epoch + 1) % cfg.train.eval_every_epoch == 0:
+            print(f"Running retrieval evaluation (max_images={args.eval_max_images})...")
+            metrics = run_retrieval_eval(model, cfg, device, max_images=args.eval_max_images)
             print(f"  I->T R@1={metrics['i2t_r1']:.2f}  "
                   f"R@5={metrics['i2t_r5']:.2f}  R@10={metrics['i2t_r10']:.2f}")
             print(f"  T->I R@1={metrics['t2i_r1']:.2f}  "
                   f"R@5={metrics['t2i_r5']:.2f}  R@10={metrics['t2i_r10']:.2f}")
             epoch_record["retrieval"] = metrics
 
+            # Track best for checkpoint retention
+            rsum = metrics["i2t_r1"] + metrics["t2i_r1"]
+            if rsum > best_metric_val:
+                best_metric_val = rsum
+                best_metric_epoch = epoch + 1
+
             if cfg.train.use_wandb:
                 import wandb
                 wandb.log(metrics, step=(epoch + 1) * len(train_loader))
 
         history.append(epoch_record)
+
+        # --- Checkpoint retention ---
+        manage_checkpoints(
+            save_dir=cfg.train.save_dir,
+            save_strategy=args.save_strategy,
+            keep_last_k=args.keep_last_k,
+            current_epoch=epoch + 1,
+            best_metric_epoch=best_metric_epoch,
+        )
 
     # --- Save results file ---
     wall_time = time.time() - wall_start
@@ -305,6 +380,8 @@ def train():
         "seed": args.seed,
         "wall_time_seconds": round(wall_time, 1),
         "trainable_params": n_trainable,
+        "save_strategy": args.save_strategy,
+        "checkpoint_size_mb": round(ckpt_size_mb, 1) if 'ckpt_size_mb' in dir() else None,
         "history": history,
         "final_retrieval": history[-1].get("retrieval", {}),
     }

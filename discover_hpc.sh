@@ -1,8 +1,6 @@
 #!/bin/bash
 # Run this on the HPC to discover your cluster's configuration.
 # Usage: bash discover_hpc.sh
-#
-# Copy the output and paste it back so I can configure your SLURM script.
 
 echo "============================================"
 echo "HPC Configuration Discovery"
@@ -42,6 +40,4 @@ ls -d /work/$USER 2>/dev/null && echo "Work exists" || echo "No /work/$USER"
 ls -d /tmp/$USER 2>/dev/null && echo "Tmp exists" || echo "No /tmp/$USER"
 
 echo ""
-echo "============================================"
-echo "Copy everything above and paste it back."
 echo "============================================"

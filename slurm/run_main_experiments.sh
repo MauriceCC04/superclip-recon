@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=superclip-main
+#SBATCH --job-name=superclip-main-chained
 #SBATCH --account=3202029
 #SBATCH --partition=stud
 #SBATCH --qos=stud
@@ -12,41 +12,27 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 
-# Main study only:
-#   - baseline
-#   - Variant A
-#   - Variant B
-# No ablation sweep here.
+# ============================================================
+# LEGACY CHAINED MAIN EXPERIMENTS
+#
+# This runs baseline + Variant A + Variant B in one job.
+# **Preferred** workflow is to use slurm/submit_main_experiments.sh
+# which submits them as three independent jobs.
+#
+# Kept here only for emergencies (e.g. quick total-of-3 run under
+# a single job budget).
+# ============================================================
 
 set -euo pipefail
 
-cd "${SLURM_SUBMIT_DIR:-$PWD}"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
+cd "$PROJECT_ROOT"
 
-echo "=== Main experiments job started: $(date) ==="
-echo "Node: $(hostname)"
-echo "Job ID: $SLURM_JOB_ID"
+print_job_header
+activate_env
 
-module load miniconda3
-if command -v conda >/dev/null 2>&1; then
-    eval "$(conda shell.bash hook)"
-else
-    echo "ERROR: conda not available after module load"
-    exit 1
-fi
-conda activate superclip
-
-if [ ! -d "data/coco/train2017" ]; then
-    echo "ERROR: COCO data not found. Run bash slurm/setup_env_ready.sh first."
-    exit 1
-fi
-if [ ! -f "vocab.json" ]; then
-    echo "ERROR: vocab.json not found. Run bash slurm/setup_env_ready.sh first."
-    exit 1
-fi
-if [ ! -f "phrases.json" ]; then
-    echo "ERROR: phrases.json not found. Run bash slurm/setup_env_ready.sh first."
-    exit 1
-fi
+ensure_data_file "data/coco/train2017"
+ensure_data_file "vocab.json"
 
 mkdir -p checkpoints results
 
@@ -55,37 +41,30 @@ python sanity_check.py --coco_root ./data/coco --vocab_path ./vocab.json
 
 echo "=== Baseline ==="
 python train.py \
-    --lambda_recon 0.0 \
-    --epochs 10 \
-    --batch_size 128 \
-    --lr 1e-5 \
+    --lambda_recon 0.0 --variant A --mask_ratio 0.15 \
+    --epochs 10 --batch_size 128 --lr 1e-5 \
+    --save_strategy last_and_best --keep_last_k 1 \
     --save_dir ./checkpoints/baseline \
     --run_name baseline \
     --results_file ./results/baseline.json
 
 echo "=== Variant A ==="
 python train.py \
-    --lambda_recon 0.5 \
-    --variant A \
-    --mask_ratio 0.15 \
-    --epochs 10 \
-    --batch_size 128 \
-    --lr 1e-5 \
+    --lambda_recon 0.5 --variant A --mask_ratio 0.15 \
+    --epochs 10 --batch_size 128 --lr 1e-5 \
+    --save_strategy last_and_best --keep_last_k 1 \
     --save_dir ./checkpoints/variant_a \
     --run_name variant_a \
     --results_file ./results/variant_a.json
 
 echo "=== Variant B ==="
 python train.py \
-    --lambda_recon 0.5 \
-    --variant B \
-    --mask_ratio 0.15 \
-    --epochs 10 \
-    --batch_size 128 \
-    --lr 1e-5 \
+    --lambda_recon 0.5 --variant B --mask_ratio 0.15 \
+    --epochs 10 --batch_size 128 --lr 1e-5 \
     --phrase_path ./phrases.json \
+    --save_strategy last_and_best --keep_last_k 1 \
     --save_dir ./checkpoints/variant_b \
     --run_name variant_b \
     --results_file ./results/variant_b.json
 
-echo "=== Main experiments complete: $(date) ==="
+echo "=== All main experiments complete: $(date) ==="

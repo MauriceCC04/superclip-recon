@@ -34,14 +34,11 @@ def build_vocab(coco_root: str, top_k: int, output_path: str):
             if tid not in (SOT_TOKEN, EOT_TOKEN, PAD_TOKEN):
                 counter[tid] += 1
 
-    # Take top-K most frequent tokens
     most_common = counter.most_common(top_k)
     vocab_map = {}
     for class_idx, (token_id, count) in enumerate(most_common):
         vocab_map[token_id] = class_idx
 
-    # Save
-    # JSON keys must be strings
     save_data = {
         "top_k": top_k,
         "total_unique_tokens": len(counter),

@@ -1,11 +1,6 @@
 #!/bin/bash
 # Download MS-COCO 2017 images and captions.
 # Run from the project root: bash download_coco.sh
-#
-# This will create:
-#   data/coco/train2017/         (~118K images, ~18GB)
-#   data/coco/val2017/           (~5K images, ~1GB)
-#   data/coco/annotations/       (captions JSON files)
 
 set -e
 
@@ -44,4 +39,3 @@ else
 fi
 
 echo "=== Done! Data at $COCO_ROOT ==="
-ls -la

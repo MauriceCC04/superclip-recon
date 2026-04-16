@@ -176,23 +176,29 @@ class SuperCLIPRecon(nn.Module):
         features = F.normalize(features, dim=-1)
         return features
 
-    def forward(self, images: torch.Tensor, token_ids: torch.Tensor):
+    def forward(self, images: torch.Tensor, token_ids: torch.Tensor,
+                encode_text: bool = True):
         """
         Forward pass for training.
 
         Args:
-            images:    [B, 3, 224, 224]
-            token_ids: [B, 77] tokenized captions
+            images:      [B, 3, 224, 224]
+            token_ids:   [B, 77] tokenized captions
+            encode_text: if False, skip text encoding (saves compute during training)
 
         Returns:
             dict with keys:
                 image_features: [B, D]
-                text_features:  [B, D]
+                text_features:  [B, D] or None
                 token_cls_logits: [B, num_classes]
                 recon_logits: [B, max_masks, vocab_size]
         """
         image_features = self.encode_image(images)
-        text_features = self.encode_text(token_ids)
+
+        text_features = None
+        if encode_text:
+            text_features = self.encode_text(token_ids)
+
         token_cls_logits = self.token_cls_head(image_features)
         recon_logits = self.recon_head(image_features)
 

@@ -21,21 +21,12 @@ class COCOCaptionsDataset(Dataset):
     """
 
     def __init__(self, root, ann_file, image_dir, transform=None, tokenizer=None):
-        """
-        Args:
-            root:      path to coco root, e.g. "./data/coco"
-            ann_file:  relative path to annotation json
-            image_dir: relative path to image folder
-            transform: CLIP image preprocessing transform
-            tokenizer: open_clip tokenizer callable
-        """
         self.image_root = os.path.join(root, image_dir)
         ann_path = os.path.join(root, ann_file)
 
         with open(ann_path, "r") as f:
             data = json.load(f)
 
-        # Build image_id -> list of captions
         self.img_id_to_captions = {}
         for ann in data["annotations"]:
             img_id = ann["image_id"]
@@ -43,12 +34,10 @@ class COCOCaptionsDataset(Dataset):
                 self.img_id_to_captions[img_id] = []
             self.img_id_to_captions[img_id].append(ann["caption"])
 
-        # Build image_id -> filename
         self.img_id_to_file = {}
         for img_info in data["images"]:
             self.img_id_to_file[img_info["id"]] = img_info["file_name"]
 
-        # Only keep images that have captions
         self.image_ids = sorted(
             [iid for iid in self.img_id_to_captions if iid in self.img_id_to_file]
         )
@@ -66,18 +55,13 @@ class COCOCaptionsDataset(Dataset):
         filename = self.img_id_to_file[img_id]
         img_path = os.path.join(self.image_root, filename)
 
-        # Load and preprocess image
         image = Image.open(img_path).convert("RGB")
         if self.transform is not None:
             image = self.transform(image)
 
-        # Pick a random caption for this image
         captions = self.img_id_to_captions[img_id]
         caption_raw = random.choice(captions)
 
-        # Tokenize (returns [1, 77] tensor, squeeze to [77])
         token_ids = self.tokenizer(caption_raw).squeeze(0)
 
         return image, token_ids, caption_raw, img_id
-
-

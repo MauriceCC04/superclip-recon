@@ -12,33 +12,32 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=24G
 
-# Optional compositional evaluation.
-# Requires HF_TOKEN if you want Winoground.
+# Optional compositional evaluation (Winoground requires HF_TOKEN).
 
 set -euo pipefail
 
-cd "${SLURM_SUBMIT_DIR:-$PWD}"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
+cd "$PROJECT_ROOT"
 
-module load miniconda3
-if command -v conda >/dev/null 2>&1; then
-    eval "$(conda shell.bash hook)"
-else
-    echo "ERROR: conda not available after module load"
-    exit 1
-fi
-conda activate superclip
+print_job_header
+activate_env
 
 mkdir -p results
 
 for dir in checkpoints/baseline checkpoints/variant_a checkpoints/variant_b; do
     NAME=$(basename "$dir")
-    LAST_CKPT=$(ls -t "$dir"/epoch_*.pt 2>/dev/null | head -1)
+    # Find best/last checkpoint
+    LAST_CKPT=$(ls -t "$dir"/epoch_*.pt 2>/dev/null | head -1 || true)
     if [ -n "$LAST_CKPT" ]; then
-        echo "Compositional eval: $NAME"
+        echo "Compositional eval: $NAME -> $LAST_CKPT"
         python eval_compositional.py \
             --checkpoint "$LAST_CKPT" \
             --benchmark all \
             --output "./results/compositional_${NAME}.json" \
             ${HF_TOKEN:+--hf_token "$HF_TOKEN"}
+    else
+        echo "No checkpoint found for $NAME — skipping"
     fi
 done
+
+echo "=== Compositional eval complete: $(date) ==="

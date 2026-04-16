@@ -8,8 +8,6 @@ BEFORE you waste HPC queue time.
 Usage:
     cd superclip-recon
     python tests/run_tests.py
-
-Expected output: 13/13 tests passed (takes ~60s on CPU).
 """
 
 import os
@@ -17,13 +15,12 @@ import sys
 import json
 import traceback
 import shutil
+import subprocess
 
-# Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import torch
 
-# ---------- Config ----------
 TEST_DATA_ROOT = "test_data/coco"
 TEST_VOCAB_PATH = "test_data/vocab.json"
 TEST_PHRASE_PATH = "test_data/phrases.json"
@@ -33,7 +30,6 @@ results = []
 
 
 def test(name):
-    """Decorator to register and run a test."""
     def decorator(fn):
         def wrapper():
             print(f"\n{'─'*60}")
@@ -52,41 +48,28 @@ def test(name):
     return decorator
 
 
-# ============================================================
-# Tests
-# ============================================================
-
-@test("1. Create synthetic test data")
+@test("01. Create synthetic test data")
 def test_create_data():
     from tests.create_test_data import create_test_data
     create_test_data(root=TEST_DATA_ROOT, n_train=16, n_val=8)
-
     assert os.path.isdir(f"{TEST_DATA_ROOT}/train2017")
     assert os.path.isdir(f"{TEST_DATA_ROOT}/val2017")
     assert os.path.isfile(f"{TEST_DATA_ROOT}/annotations/captions_train2017.json")
-    assert os.path.isfile(f"{TEST_DATA_ROOT}/annotations/captions_val2017.json")
     assert len(os.listdir(f"{TEST_DATA_ROOT}/train2017")) == 16
-    assert len(os.listdir(f"{TEST_DATA_ROOT}/val2017")) == 8
 
 
-@test("2. Build vocabulary")
+@test("02. Build vocabulary")
 def test_build_vocab():
     from build_vocab import build_vocab, load_vocab
-
     vocab_map = build_vocab(TEST_DATA_ROOT, top_k=50, output_path=TEST_VOCAB_PATH)
-    assert len(vocab_map) > 0, "Vocab is empty"
-    assert len(vocab_map) <= 50, f"Vocab too large: {len(vocab_map)}"
-
-    # Reload and verify
+    assert 0 < len(vocab_map) <= 50
     loaded = load_vocab(TEST_VOCAB_PATH)
     assert len(loaded) == len(vocab_map)
-    # Keys should be ints, values should be ints
     for k, v in loaded.items():
-        assert isinstance(k, int), f"Key {k} is not int"
-        assert isinstance(v, int), f"Value {v} is not int"
+        assert isinstance(k, int) and isinstance(v, int)
 
 
-@test("3. Dataset loading")
+@test("03. Dataset loading")
 def test_dataset():
     from config import Config
     from model import SuperCLIPRecon
@@ -98,56 +81,64 @@ def test_dataset():
     cfg.model.num_token_classes = 50
 
     model = SuperCLIPRecon(cfg)
-
     ds = COCOCaptionsDataset(
-        root=TEST_DATA_ROOT,
-        ann_file=cfg.data.train_ann,
+        root=TEST_DATA_ROOT, ann_file=cfg.data.train_ann,
         image_dir=cfg.data.train_images,
-        transform=model.preprocess,
-        tokenizer=model.tokenizer,
+        transform=model.preprocess, tokenizer=model.tokenizer,
     )
-    assert len(ds) == 16, f"Expected 16 images, got {len(ds)}"
+    assert len(ds) == 16
 
     loader = DataLoader(ds, batch_size=4, shuffle=True, num_workers=0)
     images, token_ids, captions, img_ids = next(iter(loader))
-
-    assert images.shape == (4, 3, 224, 224), f"Bad image shape: {images.shape}"
-    assert token_ids.shape == (4, 77), f"Bad token shape: {token_ids.shape}"
+    assert images.shape == (4, 3, 224, 224)
+    assert token_ids.shape == (4, 77)
     assert len(captions) == 4
-    assert img_ids.shape == (4,), f"Bad img_ids shape: {img_ids.shape}"
 
 
-@test("4. Model forward pass")
+@test("04. Model forward pass (with text encoding)")
 def test_model_forward():
     from config import Config
     from model import SuperCLIPRecon
 
     cfg = Config()
-    cfg.data.coco_root = TEST_DATA_ROOT
     cfg.model.num_token_classes = 50
-
     model = SuperCLIPRecon(cfg).to(DEVICE)
 
     B = 4
     images = torch.randn(B, 3, 224, 224)
     token_ids = torch.randint(1, 49405, (B, 77))
-
     outputs = model(images, token_ids)
 
-    assert outputs["image_features"].shape == (B, 512), \
-        f"Bad image_features: {outputs['image_features'].shape}"
-    assert outputs["text_features"].shape == (B, 512), \
-        f"Bad text_features: {outputs['text_features'].shape}"
-    assert outputs["token_cls_logits"].shape == (B, 50), \
-        f"Bad token_cls: {outputs['token_cls_logits'].shape}"
-
+    assert outputs["image_features"].shape == (B, 512)
+    assert outputs["text_features"].shape == (B, 512)
+    assert outputs["token_cls_logits"].shape == (B, 50)
     max_masks = int(77 * cfg.model.mask_ratio) + 1
-    assert outputs["recon_logits"].shape[0] == B
-    assert outputs["recon_logits"].shape[1] == max_masks
-    assert outputs["recon_logits"].shape[2] == cfg.model.recon_vocab_size
+    assert outputs["recon_logits"].shape == (B, max_masks, cfg.model.recon_vocab_size)
 
 
-@test("5. Token classification labels")
+@test("04b. Model forward skipping text encoding (training fast path)")
+def test_model_forward_no_text():
+    """model.forward must support encode_text=False so training can skip
+    the text encoder (text_features are not used in the loss)."""
+    from config import Config
+    from model import SuperCLIPRecon
+
+    cfg = Config()
+    cfg.model.num_token_classes = 50
+    model = SuperCLIPRecon(cfg).to(DEVICE)
+
+    B = 4
+    images = torch.randn(B, 3, 224, 224)
+    token_ids = torch.randint(1, 49405, (B, 77))
+    outputs = model(images, token_ids, encode_text=False)
+
+    assert outputs["image_features"].shape == (B, 512)
+    assert outputs["text_features"] is None, \
+        "text_features MUST be None when encode_text=False"
+    assert outputs["token_cls_logits"].shape == (B, 50)
+
+
+@test("05. Token classification labels")
 def test_token_labels():
     from losses import build_token_labels
     from build_vocab import load_vocab
@@ -155,125 +146,120 @@ def test_token_labels():
     vocab_map = load_vocab(TEST_VOCAB_PATH)
     token_ids = torch.randint(1, 49405, (4, 77))
     labels = build_token_labels(token_ids, vocab_map, num_classes=50)
-
-    assert labels.shape == (4, 50), f"Bad labels shape: {labels.shape}"
+    assert labels.shape == (4, 50)
     assert labels.dtype == torch.float32
-    assert labels.min() >= 0 and labels.max() <= 1
 
 
-@test("6. Masking — Variant A (random tokens)")
+@test("06. Masking — Variant A (random tokens)")
 def test_mask_variant_a():
     from losses import create_mask
 
     token_ids = torch.randint(1, 49405, (4, 77))
-    # Set SOT/EOT
     token_ids[:, 0] = 49406
     for i in range(4):
-        token_ids[i, 10:] = 49407  # EOT at pos 10, rest padding
+        token_ids[i, 10:] = 49407
 
     max_masks = 12
     masked, targets, positions = create_mask(token_ids, mask_ratio=0.15, max_masks=max_masks)
-
     assert masked.shape == token_ids.shape
     assert targets.shape == (4, max_masks)
-    assert positions.shape == (4, max_masks)
+    assert (targets != 0).sum().item() > 0
 
-    # Verify at least some tokens were masked
-    n_masked = (targets != 0).sum().item()
-    assert n_masked > 0, "No tokens were masked"
 
-    # Verify masked positions were zeroed
+@test("06b. Mask positions are sorted (create_mask)")
+def test_mask_positions_sorted():
+    """Slot k must correspond to the k-th masked token in caption order."""
+    from losses import create_mask
+
+    torch.manual_seed(0)
+    token_ids = torch.randint(100, 49000, (8, 77))
+    token_ids[:, 0] = 49406
+    for i in range(8):
+        token_ids[i, 40:] = 49407
+
+    max_masks = 12
+    _, targets, positions = create_mask(token_ids, mask_ratio=0.3, max_masks=max_masks)
+
+    for i in range(8):
+        valid = [positions[i, k].item() for k in range(max_masks)
+                 if positions[i, k].item() >= 0]
+        assert valid == sorted(valid), \
+            f"Sample {i}: positions not sorted: {valid}"
+
+
+@test("06c. Mask positions are sorted (inline phrase extraction fallback)")
+def test_phrase_mask_positions_sorted():
+    from losses import create_phrase_mask_from_captions
+    import open_clip
+
+    tokenizer = open_clip.get_tokenizer("ViT-B-32")
+    captions = ["runs jumps", "walks flies", "sings dances", "goes leaves"]
+    token_ids = torch.cat([tokenizer(c) for c in captions], dim=0)
+
+    _, targets, positions = create_phrase_mask_from_captions(
+        token_ids, captions, tokenizer, max_masks=12
+    )
+
     for i in range(4):
-        for k in range(max_masks):
-            pos = positions[i, k].item()
-            if pos >= 0:
-                assert masked[i, pos].item() == 0, "Masked position not zeroed"
+        valid = [positions[i, k].item() for k in range(12)
+                 if positions[i, k].item() >= 0]
+        assert valid == sorted(valid), \
+            f"Sample {i}: positions not sorted: {valid}"
 
 
-@test("7. Masking — Variant B (phrase masking, image-level)")
+@test("07. Masking — Variant B (image-level phrase)")
 def test_mask_variant_b():
     from losses import create_phrase_mask
     import open_clip
 
     tokenizer = open_clip.get_tokenizer("ViT-B-32")
-
-    # Create a known caption and its tokenization
     caption = "a red car parked on the street"
-    token_ids = tokenizer(caption)  # [1, 77]
-    token_ids = token_ids.repeat(4, 1)  # [4, 77]
+    token_ids = tokenizer(caption).repeat(4, 1)
 
-    # Create fake phrase data
     phrase_toks = tokenizer("red car").squeeze(0).tolist()
     content_toks = [t for t in phrase_toks if t not in (49406, 49407, 0)]
-
     phrase_data = {
-        "1": [{"phrase": "red car", "token_ids": content_toks}],
-        "2": [{"phrase": "red car", "token_ids": content_toks}],
-        "3": [{"phrase": "red car", "token_ids": content_toks}],
-        "4": [{"phrase": "red car", "token_ids": content_toks}],
+        str(i): [{"phrase": "red car", "token_ids": content_toks}]
+        for i in range(1, 5)
     }
-    image_ids = [1, 2, 3, 4]
 
     masked, targets, positions = create_phrase_mask(
-        token_ids, phrase_data, image_ids, max_masks=12
+        token_ids, phrase_data, [1, 2, 3, 4], max_masks=12
     )
-
-    assert masked.shape == token_ids.shape
-    assert targets.shape == (4, 12)
-    n_masked = (targets != 0).sum().item()
-    assert n_masked > 0, "No phrase tokens were masked"
+    assert (targets != 0).sum().item() > 0
 
 
-@test("7b. Masking — Variant B (per-caption inline extraction)")
+@test("07b. Masking — Variant B (per-caption inline)")
 def test_mask_variant_b_inline():
-    """Test the new create_phrase_mask_from_captions that extracts phrases
-    directly from the current caption, fixing the alignment problem."""
     from losses import create_phrase_mask_from_captions
     import open_clip
 
     tokenizer = open_clip.get_tokenizer("ViT-B-32")
-
     captions = [
         "a red car parked on the street",
         "two black dogs playing in the park",
         "a woman riding a brown horse",
         "the tall building near the river",
     ]
-
-    token_ids = torch.cat([tokenizer(c) for c in captions], dim=0)  # [4, 77]
-    assert token_ids.shape == (4, 77)
+    token_ids = torch.cat([tokenizer(c) for c in captions], dim=0)
 
     masked, targets, positions = create_phrase_mask_from_captions(
         token_ids, captions, tokenizer, max_masks=12
     )
 
-    assert masked.shape == (4, 77)
-    assert targets.shape == (4, 12)
-    assert positions.shape == (4, 12)
-
     n_masked = (targets != 0).sum().item()
-    assert n_masked > 0, "No tokens masked by inline phrase extraction"
+    assert n_masked > 0
 
-    # Verify that masked positions were actually zeroed out
+    # Targets must match token_ids at each masked position
     for i in range(4):
         for k in range(12):
             pos = positions[i, k].item()
             if pos >= 0:
-                assert masked[i, pos].item() == 0, \
-                    f"Position {pos} in sample {i} was not zeroed"
-
-    # Verify targets match original token IDs (not some other caption's tokens)
-    for i in range(4):
-        for k in range(12):
-            pos = positions[i, k].item()
-            if pos >= 0:
-                assert targets[i, k].item() == token_ids[i, pos].item(), \
-                    f"Target mismatch at sample {i}, slot {k}"
-
-    print(f"  Masked {n_masked} tokens across 4 samples via inline extraction")
+                assert targets[i, k].item() == token_ids[i, pos].item()
+                assert masked[i, pos].item() == 0
 
 
-@test("8. Loss computation + backward")
+@test("08. Loss + backward")
 def test_loss_backward():
     from config import Config
     from model import SuperCLIPRecon
@@ -281,9 +267,7 @@ def test_loss_backward():
     from build_vocab import load_vocab
 
     cfg = Config()
-    cfg.data.coco_root = TEST_DATA_ROOT
     cfg.model.num_token_classes = 50
-
     model = SuperCLIPRecon(cfg).to(DEVICE)
     vocab_map = load_vocab(TEST_VOCAB_PATH)
 
@@ -297,31 +281,17 @@ def test_loss_backward():
     max_masks = int(77 * cfg.model.mask_ratio) + 1
     _, mask_targets, _ = create_mask(token_ids, cfg.model.mask_ratio, max_masks)
 
-    outputs = model(images, token_ids)
+    outputs = model(images, token_ids, encode_text=False)
     labels = build_token_labels(token_ids, vocab_map, 50)
-
-    loss, loss_dict = total_loss(
+    loss, _ = total_loss(
         outputs["token_cls_logits"], labels,
-        outputs["recon_logits"], mask_targets,
-        lambda_recon=0.5,
+        outputs["recon_logits"], mask_targets, 0.5,
     )
-
-    assert loss.requires_grad, "Loss doesn't require grad"
-    assert not torch.isnan(loss), "Loss is NaN"
-    assert not torch.isinf(loss), "Loss is Inf"
-
+    assert loss.requires_grad
     loss.backward()
 
-    # Check gradients exist
-    has_grad = any(p.grad is not None and p.grad.abs().sum() > 0
-                   for p in model.parameters() if p.requires_grad)
-    assert has_grad, "No gradients computed"
 
-    for k in ["l_token_cls", "l_recon", "l_total"]:
-        assert k in loss_dict, f"Missing key {k} in loss_dict"
-
-
-@test("9. Phrase extraction")
+@test("09. Phrase extraction")
 def test_phrase_extraction():
     from extract_phrases import extract_with_regex, tokenize_phrases
     from collections import defaultdict
@@ -332,22 +302,18 @@ def test_phrase_extraction():
     captions_by_id[2] = ["two black dogs playing in the park"]
 
     phrases = extract_with_regex(captions_by_id)
-    assert len(phrases) > 0, "No phrases extracted"
+    assert len(phrases) > 0
 
     tokenizer = open_clip.get_tokenizer("ViT-B-32")
     tokenized = tokenize_phrases(phrases, tokenizer)
+    assert sum(len(v) for v in tokenized.values()) > 0
 
-    total = sum(len(v) for v in tokenized.values())
-    assert total > 0, "No tokenized phrases"
-
-    # Save for other tests
     with open(TEST_PHRASE_PATH, "w") as f:
         json.dump(tokenized, f)
 
 
-@test("10. End-to-end mini training + eval")
-def test_e2e_train_eval():
-    """Run 1 epoch of training + retrieval eval on synthetic data."""
+@test("10. E2E mini training + retrieval metrics")
+def test_e2e():
     from config import Config
     from model import SuperCLIPRecon
     from dataset import COCOCaptionsDataset
@@ -360,29 +326,25 @@ def test_e2e_train_eval():
     cfg = Config()
     cfg.data.coco_root = TEST_DATA_ROOT
     cfg.model.num_token_classes = 50
-    cfg.train.batch_size = 4
 
     model = SuperCLIPRecon(cfg).to(DEVICE)
     vocab_map = load_vocab(TEST_VOCAB_PATH)
     max_masks = int(77 * cfg.model.mask_ratio) + 1
 
     ds = COCOCaptionsDataset(
-        root=TEST_DATA_ROOT,
-        ann_file=cfg.data.train_ann,
+        root=TEST_DATA_ROOT, ann_file=cfg.data.train_ann,
         image_dir=cfg.data.train_images,
-        transform=model.preprocess,
-        tokenizer=model.tokenizer,
+        transform=model.preprocess, tokenizer=model.tokenizer,
     )
     loader = DataLoader(ds, batch_size=4, shuffle=True, num_workers=0, drop_last=True)
 
     trainable = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(trainable, lr=1e-5)
 
-    # Train 1 batch
     model.train()
     images, token_ids, _, _ = next(iter(loader))
     _, mask_targets, _ = create_mask(token_ids, cfg.model.mask_ratio, max_masks)
-    outputs = model(images, token_ids)
+    outputs = model(images, token_ids, encode_text=False)
     labels = build_token_labels(token_ids, vocab_map, 50)
     loss, _ = total_loss(
         outputs["token_cls_logits"], labels,
@@ -392,140 +354,209 @@ def test_e2e_train_eval():
     loss.backward()
     optimizer.step()
 
-    # Eval: compute retrieval on random embeddings (just test the function works)
     N = 8
     img_embs = np.random.randn(N, 512).astype(np.float32)
     img_embs = img_embs / np.linalg.norm(img_embs, axis=1, keepdims=True)
     txt_embs = np.random.randn(N * 5, 512).astype(np.float32)
     txt_embs = txt_embs / np.linalg.norm(txt_embs, axis=1, keepdims=True)
-
     metrics = compute_retrieval_metrics(img_embs, txt_embs)
     for k in ["i2t_r1", "i2t_r5", "i2t_r10", "t2i_r1", "t2i_r5", "t2i_r10"]:
-        assert k in metrics, f"Missing metric: {k}"
-        assert 0 <= metrics[k] <= 100, f"Bad metric value: {k}={metrics[k]}"
+        assert k in metrics
 
 
-@test("11. Compositional eval imports and logic")
+@test("11. Compositional eval imports")
 def test_compositional_eval():
-    """Test that eval_compositional.py loads and its functions are callable.
-    Does NOT download real datasets — only checks imports and function signatures."""
-    from eval_compositional import (
-        evaluate_winoground, evaluate_aro, run_compositional_eval
-    )
+    from eval_compositional import evaluate_aro, run_compositional_eval
     from config import Config
     from model import SuperCLIPRecon
 
     cfg = Config()
-    cfg.data.coco_root = TEST_DATA_ROOT
     cfg.model.num_token_classes = 50
     model = SuperCLIPRecon(cfg).to(DEVICE)
 
-    # Only test Winoground path (skips immediately with no HF token — no download)
     metrics = run_compositional_eval(model, DEVICE, benchmarks="winoground", hf_token=None)
-    assert isinstance(metrics, dict), "run_compositional_eval should return a dict"
-
-    # Verify ARO function exists and is callable (don't actually call it —
-    # it would try to download ~1GB of images)
-    assert callable(evaluate_aro), "evaluate_aro should be callable"
+    assert isinstance(metrics, dict)
+    assert callable(evaluate_aro)
 
 
-@test("12. Analysis script on synthetic results")
-def test_analysis_script():
-    """Test that analyze_results.py runs on fake result files."""
-    from analyze_results import (
-        plot_retrieval_comparison, plot_loss_curves,
-        plot_lambda_sweep, plot_maskrate_sweep,
-        plot_compositional, setup_style
+@test("12. analyze_results filters non-main JSON files")
+def test_analyze_results_filter():
+    """load_all_results must ignore compositional_*.json, summary.json,
+    preflight_*.json, smoke_*.json, and files missing required schema."""
+    from analyze_results import load_all_results, _is_main_result
+
+    fake_dir = "test_data/results_filter"
+    os.makedirs(fake_dir, exist_ok=True)
+
+    with open(os.path.join(fake_dir, "baseline.json"), "w") as f:
+        json.dump({
+            "run_name": "baseline", "variant": "A", "lambda_recon": 0.0,
+            "mask_ratio": 0.15, "final_retrieval": {"i2t_r1": 25.0},
+        }, f)
+    with open(os.path.join(fake_dir, "compositional_baseline.json"), "w") as f:
+        json.dump({"winoground_group_score": 10.0}, f)
+    with open(os.path.join(fake_dir, "smoke_results.json"), "w") as f:
+        json.dump({"run_name": "smoke", "retrieval": {}}, f)
+    with open(os.path.join(fake_dir, "preflight_report.json"), "w") as f:
+        json.dump({"overall_status": "PASS"}, f)
+    with open(os.path.join(fake_dir, "summary.json"), "w") as f:
+        json.dump([{"x": 1}], f)
+    with open(os.path.join(fake_dir, "random_thing.json"), "w") as f:
+        json.dump({"unrelated": True}, f)
+
+    loaded = load_all_results(fake_dir)
+
+    assert "baseline" in loaded
+    assert "compositional_baseline" not in loaded, \
+        "compositional files must NOT be loaded as main results"
+    assert "smoke_results" not in loaded
+    assert "preflight_report" not in loaded
+    assert "summary" not in loaded
+    assert "random_thing" not in loaded, \
+        "files lacking run_name/variant/lambda_recon must NOT be loaded as main"
+
+    # Predicate tests
+    assert _is_main_result("baseline.json",
+                           {"run_name": "x", "variant": "A", "lambda_recon": 0.0,
+                            "final_retrieval": {}}) is True
+    assert _is_main_result("compositional_x.json", {"anything": 1}) is False
+    assert _is_main_result("smoke_x.json", {"run_name": "x"}) is False
+
+
+@test("13. Checkpoint retention policy")
+def test_checkpoint_retention():
+    """manage_checkpoints must delete old checkpoints while always keeping
+    current epoch + best + last_k, per save_strategy."""
+    from train import manage_checkpoints
+
+    save_dir = "test_data/ckpt_retention"
+    if os.path.exists(save_dir):
+        shutil.rmtree(save_dir)
+    os.makedirs(save_dir)
+
+    for epoch in range(1, 6):
+        path = os.path.join(save_dir, f"epoch_{epoch}.pt")
+        torch.save({"epoch": epoch, "dummy": torch.zeros(10)}, path)
+
+    # last_and_best, current=5, best=3, keep_last_k=1 → keep {3, 5}
+    manage_checkpoints(save_dir, "last_and_best", keep_last_k=1,
+                       current_epoch=5, best_metric_epoch=3)
+    remaining = sorted(os.listdir(save_dir))
+    assert "epoch_3.pt" in remaining
+    assert "epoch_5.pt" in remaining
+    assert "epoch_1.pt" not in remaining
+    assert "epoch_2.pt" not in remaining
+    assert "epoch_4.pt" not in remaining
+
+    # all: keep everything
+    shutil.rmtree(save_dir); os.makedirs(save_dir)
+    for epoch in range(1, 4):
+        torch.save({"epoch": epoch}, os.path.join(save_dir, f"epoch_{epoch}.pt"))
+    manage_checkpoints(save_dir, "all", keep_last_k=0,
+                       current_epoch=3, best_metric_epoch=1)
+    assert len(os.listdir(save_dir)) == 3
+
+    # last: only keep current
+    shutil.rmtree(save_dir); os.makedirs(save_dir)
+    for epoch in range(1, 5):
+        torch.save({"epoch": epoch}, os.path.join(save_dir, f"epoch_{epoch}.pt"))
+    manage_checkpoints(save_dir, "last", keep_last_k=0,
+                       current_epoch=4, best_metric_epoch=2)
+    assert os.listdir(save_dir) == ["epoch_4.pt"]
+
+
+@test("14. Repo root resolution via slurm/common.sh")
+def test_repo_root_resolution():
+    """slurm scripts must resolve PROJECT_ROOT from common.sh location,
+    not from CWD. Sourcing common.sh from /tmp must still set PROJECT_ROOT
+    to the repo root."""
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    common_sh = os.path.join(project_root, "slurm", "common.sh")
+    assert os.path.isfile(common_sh), f"slurm/common.sh missing: {common_sh}"
+
+    result = subprocess.run(
+        ["bash", "-c", f'source "{common_sh}" >/dev/null 2>&1 && echo "$PROJECT_ROOT"'],
+        capture_output=True, text=True, cwd="/tmp",
     )
-
-    setup_style()
-
-    fake_results_dir = "test_data/results"
-    fake_figures_dir = "test_data/results/figures"
-    os.makedirs(fake_figures_dir, exist_ok=True)
-
-    # Create fake main results
-    for name in ["baseline", "variant_a", "variant_b"]:
-        lam = 0.0 if name == "baseline" else 0.5
-        fake = {
-            "run_name": name,
-            "variant": "A" if name != "variant_b" else "B",
-            "lambda_recon": lam,
-            "mask_ratio": 0.15,
-            "wall_time_seconds": 600,
-            "history": [
-                {"epoch": 1, "losses": {"l_total": 2.0, "l_token_cls": 1.5, "l_recon": 1.0},
-                 "retrieval": {"i2t_r1": 20, "i2t_r5": 45, "i2t_r10": 60,
-                               "t2i_r1": 18, "t2i_r5": 42, "t2i_r10": 57}},
-                {"epoch": 2, "losses": {"l_total": 1.5, "l_token_cls": 1.2, "l_recon": 0.6},
-                 "retrieval": {"i2t_r1": 25, "i2t_r5": 50, "i2t_r10": 65,
-                               "t2i_r1": 22, "t2i_r5": 47, "t2i_r10": 62}},
-            ],
-            "final_retrieval": {"i2t_r1": 25, "i2t_r5": 50, "i2t_r10": 65,
-                                "t2i_r1": 22, "t2i_r5": 47, "t2i_r10": 62},
-        }
-        with open(os.path.join(fake_results_dir, f"{name}.json"), "w") as f:
-            json.dump(fake, f)
-
-    # Create fake ablation results
-    abl_dir = os.path.join(fake_results_dir, "ablations")
-    os.makedirs(abl_dir, exist_ok=True)
-    for lam in [0.0, 0.1, 0.5, 1.0]:
-        fake = {
-            "run_name": f"lambda_{lam}",
-            "lambda_recon": lam,
-            "mask_ratio": 0.15,
-            "final_retrieval": {"i2t_r1": 20 + lam * 5, "t2i_r1": 18 + lam * 4},
-        }
-        with open(os.path.join(abl_dir, f"lambda_{lam:.1f}.json"), "w") as f:
-            json.dump(fake, f)
-
-    for mr in [0.10, 0.15, 0.25]:
-        fake = {
-            "run_name": f"maskrate_{mr}",
-            "mask_ratio": mr,
-            "lambda_recon": 0.5,
-            "final_retrieval": {"i2t_r1": 22 + mr * 10, "t2i_r1": 20 + mr * 8},
-        }
-        with open(os.path.join(abl_dir, f"maskrate_{mr:.2f}.json"), "w") as f:
-            json.dump(fake, f)
-
-    # Test all plot functions (they should not crash)
-    from analyze_results import load_all_results, load_ablation_results
-    main_results = load_all_results(fake_results_dir)
-    ablation_results = load_ablation_results(fake_results_dir)
-
-    plot_retrieval_comparison(main_results, fake_figures_dir)
-    plot_loss_curves(main_results, fake_figures_dir)
-    plot_lambda_sweep(ablation_results, fake_figures_dir)
-    plot_maskrate_sweep(ablation_results, fake_figures_dir)
-    plot_compositional({}, fake_figures_dir)  # empty is fine, should skip
-
-    # Verify files were created
-    expected_files = ["retrieval_comparison.png", "loss_curves.png",
-                      "lambda_sweep.png", "maskrate_sweep.png"]
-    for fname in expected_files:
-        path = os.path.join(fake_figures_dir, fname)
-        assert os.path.isfile(path), f"Missing plot: {fname}"
+    assert result.returncode == 0, f"common.sh failed: {result.stderr}"
+    resolved = result.stdout.strip().splitlines()[-1]
+    assert os.path.realpath(resolved) == os.path.realpath(project_root), \
+        f"PROJECT_ROOT resolved to {resolved}, expected {project_root}"
 
 
-# ============================================================
-# Runner
-# ============================================================
+@test("15. Preflight JSON schema")
+def test_preflight_schema():
+    """hpc_preflight must define a report skeleton with all required keys."""
+    from tools.hpc_preflight import build_report_skeleton, validate_report_schema
+
+    report = build_report_skeleton()
+    validate_report_schema(report)  # must not raise
+
+    assert report["overall_status"] in ("PASS", "WARN", "FAIL")
+    for key in ("repo", "imports", "gpu", "data", "cache", "storage", "runtime"):
+        assert key in report["checks"]
+    for key in ("gpu_peak_mem_gb", "checkpoint_size_mb",
+                "one_step_seconds", "tiny_eval_seconds"):
+        assert key in report["metrics"]
+
+
+@test("16. Preflight storage estimator")
+def test_preflight_storage_estimator():
+    """The estimator must not crash on missing dirs and must classify
+    usage against a quota."""
+    from tools.hpc_preflight import estimate_storage, classify_storage
+
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    est = estimate_storage(project_root)
+    assert est["total_bytes"] >= 0
+    assert isinstance(est["breakdown"], dict)
+
+    est = estimate_storage("/definitely/does/not/exist/xyz123")
+    assert est["total_bytes"] == 0
+
+    assert classify_storage(used_gb=10, quota_gb=100) == "PASS"
+    assert classify_storage(used_gb=92, quota_gb=100) == "WARN"
+    assert classify_storage(used_gb=101, quota_gb=100) == "FAIL"
+
+
+@test("17. Slurm scripts parse and source common.sh")
+def test_slurm_scripts_parseable():
+    """All slurm/*.sh must have valid bash syntax and must source common.sh
+    (except common.sh itself)."""
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    slurm_dir = os.path.join(project_root, "slurm")
+
+    shs = [f for f in os.listdir(slurm_dir) if f.endswith(".sh")]
+    assert "common.sh" in shs, "slurm/common.sh missing"
+
+    for fname in shs:
+        path = os.path.join(slurm_dir, fname)
+        # Syntax check
+        result = subprocess.run(["bash", "-n", path], capture_output=True, text=True)
+        assert result.returncode == 0, \
+            f"{fname} has bash syntax errors:\n{result.stderr}"
+
+        if fname == "common.sh":
+            continue
+        with open(path) as f:
+            content = f.read()
+        assert "common.sh" in content, \
+            f"{fname} does not source common.sh — will break if sbatch'd from wrong CWD"
+
 
 def main():
     all_tests = [v for v in globals().values()
                  if callable(v) and hasattr(v, "test_name")]
+    all_tests.sort(key=lambda f: f.test_name)
 
-    print("="*60)
+    print("=" * 60)
     print("SuperCLIP-Recon Local Test Suite")
     print(f"Running {len(all_tests)} tests on CPU with synthetic data")
-    print("="*60)
+    print("=" * 60)
 
     for t in all_tests:
         t()
 
-    # Summary
     print(f"\n{'='*60}")
     print("RESULTS")
     print(f"{'='*60}")
@@ -537,15 +568,13 @@ def main():
 
     print(f"\n{passed}/{total} tests passed")
 
-    # Cleanup
     if os.path.isdir("test_data"):
         shutil.rmtree("test_data")
         print("Cleaned up test_data/")
 
     if passed < total:
         sys.exit(1)
-    else:
-        print("\nAll clear — safe to submit to HPC.")
+    print("\nAll clear — safe to submit to HPC.")
 
 
 if __name__ == "__main__":

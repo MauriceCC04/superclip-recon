@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=superclip-smoke
+#SBATCH --job-name=superclip-gpusmoke
 #SBATCH --account=3202029
 #SBATCH --partition=stud
 #SBATCH --qos=stud
@@ -7,19 +7,22 @@
 #SBATCH --error=err/%x_%j.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=3202029@studbocconi.it
-#SBATCH --time=02:00:00
+#SBATCH --time=01:00:00
 #SBATCH --gres=gpu:4g.40gb:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=24G
 
+# Gate 2 — Cluster GPU smoke.
+# Runs sanity_check.py + smoke_test.py and writes a structured JSON
+# under results/smoke/ with wall time, peak GPU memory, checkpoint size,
+# and retrieval metrics.
+
 set -euo pipefail
 
-# Resolve PROJECT_ROOT + cache env from script location
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
 cd "$PROJECT_ROOT"
 
 print_job_header
-
 activate_env
 
 ensure_data_file "data/coco/train2017"
@@ -30,14 +33,16 @@ mkdir -p checkpoints/smoke results/smoke
 echo "=== Sanity check ==="
 python sanity_check.py --coco_root ./data/coco --vocab_path ./vocab.json
 
-echo "=== Short smoke training + quick retrieval ==="
+echo "=== GPU smoke training + quick retrieval ==="
+# smoke_test.py writes results_file including peak mem, ckpt size, eval time
 python tests/smoke_test.py \
     --coco_root ./data/coco \
     --vocab_path ./vocab.json \
-    --steps 3 \
-    --batch_size 16 \
-    --eval_images 64 \
+    --steps 5 \
+    --batch_size 32 \
+    --eval_images 128 \
     --save_path ./checkpoints/smoke/smoke_step.pt \
-    --results_file ./results/smoke/smoke_results.json
+    --results_file ./results/smoke/gpu_smoke_results.json
 
-echo "=== Smoke job complete: $(date) ==="
+echo "=== GPU smoke complete: $(date) ==="
+cat ./results/smoke/gpu_smoke_results.json | head -60

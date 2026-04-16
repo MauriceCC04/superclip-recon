@@ -90,6 +90,10 @@ def create_mask(token_ids: torch.Tensor, mask_ratio: float, max_masks: int):
     """
     Randomly mask content tokens in a caption.
 
+    Masked positions are sorted in ascending caption order before being
+    written into slots, so slot k always corresponds to the k-th masked
+    position from left to right in the caption.
+
     Args:
         token_ids:  [B, seq_len] CLIP token IDs
         mask_ratio: fraction of content tokens to mask
@@ -123,7 +127,7 @@ def create_mask(token_ids: torch.Tensor, mask_ratio: float, max_masks: int):
 
         # Random selection
         perm = torch.randperm(len(content_pos))[:n_mask]
-        selected = [content_pos[p] for p in perm]
+        selected = sorted([content_pos[p] for p in perm])  # ← sorted for slot order
 
         for k, pos in enumerate(selected):
             mask_targets[i, k] = token_ids[i, pos]
@@ -174,8 +178,8 @@ def create_phrase_mask(token_ids: torch.Tensor, phrase_data: dict, image_ids: li
                 continue
             n_mask = max(1, min(len(content_pos) // 4, max_masks))
             perm = torch.randperm(len(content_pos))[:n_mask]
-            for k, p_idx in enumerate(perm):
-                pos = content_pos[p_idx]
+            selected = sorted([content_pos[p_idx] for p_idx in perm])  # ← sorted
+            for k, pos in enumerate(selected):
                 mask_targets[i, k] = token_ids[i, pos]
                 mask_positions[i, k] = pos
                 masked_token_ids[i, pos] = PAD_TOKEN
@@ -200,7 +204,7 @@ def create_phrase_mask(token_ids: torch.Tensor, phrase_data: dict, image_ids: li
                 masked_token_ids[i, pos] = PAD_TOKEN
             continue
 
-        # Mask the entire phrase span
+        # Mask the entire phrase span (already contiguous → already sorted)
         n_phrase_toks = min(len(phrase_toks), max_masks)
         for k in range(n_phrase_toks):
             pos = span_start + k
@@ -292,7 +296,7 @@ def create_phrase_mask_from_captions(
                 if span_start == -1:
                     continue
 
-                # Mask the whole phrase span
+                # Mask the whole phrase span (contiguous → already sorted)
                 n_phrase_toks = min(len(content_toks), max_masks)
                 for k in range(n_phrase_toks):
                     pos = span_start + k
@@ -310,8 +314,8 @@ def create_phrase_mask_from_captions(
                 continue
             n_mask = max(1, min(len(content_pos) // 4, max_masks))
             perm = torch.randperm(len(content_pos))[:n_mask]
-            for k, p_idx in enumerate(perm):
-                pos = content_pos[p_idx]
+            selected = sorted([content_pos[p_idx] for p_idx in perm])  # ← sorted
+            for k, pos in enumerate(selected):
                 mask_targets[i, k] = token_ids[i, pos]
                 mask_positions[i, k] = pos
                 masked_token_ids[i, pos] = PAD_TOKEN

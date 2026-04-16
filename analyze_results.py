@@ -20,7 +20,6 @@ import argparse
 import csv
 from collections import defaultdict
 
-# Use non-interactive backend so it works on HPC without display
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -49,14 +48,52 @@ def setup_style():
 
 # ─── Data Loading ────────────────────────────────────────────────────────────
 
+# Files that are NOT main training results and should be excluded
+_NON_MAIN_PREFIXES = ("compositional_", "summary", "preflight", "smoke", "pilot")
+_NON_MAIN_SUBDIRS = ("ablations", "figures", "preflight", "smoke")
+
+
+def _is_main_result(fname: str, data: dict) -> bool:
+    """
+    Return True only if this JSON looks like a main training result.
+    Filters out compositional evals, smoke results, preflight reports, etc.
+    """
+    base = fname.replace(".json", "")
+
+    # Reject known non-main prefixes
+    for prefix in _NON_MAIN_PREFIXES:
+        if base.startswith(prefix):
+            return False
+
+    # Schema check: a main training result must have these keys
+    required_keys = {"run_name", "variant", "lambda_recon"}
+    if not required_keys.issubset(data.keys()):
+        return False
+
+    # Must have final_retrieval or history (actual training output)
+    if "final_retrieval" not in data and "history" not in data:
+        return False
+
+    return True
+
+
 def load_all_results(results_dir):
-    """Load all result JSONs from directory (non-recursive)."""
+    """Load all main training result JSONs from directory (non-recursive)."""
     results = {}
     for fname in sorted(os.listdir(results_dir)):
-        if fname.endswith(".json") and fname != "summary.json":
-            path = os.path.join(results_dir, fname)
+        if not fname.endswith(".json"):
+            continue
+        # Skip subdirectory names that happen to match
+        path = os.path.join(results_dir, fname)
+        if not os.path.isfile(path):
+            continue
+        try:
             with open(path) as f:
                 data = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            continue
+
+        if _is_main_result(fname, data):
             key = fname.replace(".json", "")
             results[key] = data
     return results
@@ -67,7 +104,22 @@ def load_ablation_results(results_dir):
     ablation_dir = os.path.join(results_dir, "ablations")
     if not os.path.isdir(ablation_dir):
         return {}
-    return load_all_results(ablation_dir)
+    # Ablation results use the same schema as main results
+    raw = {}
+    for fname in sorted(os.listdir(ablation_dir)):
+        if not fname.endswith(".json") or fname == "summary.json":
+            continue
+        path = os.path.join(ablation_dir, fname)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            continue
+        key = fname.replace(".json", "")
+        raw[key] = data
+    return raw
 
 
 def load_compositional_results(results_dir):
@@ -76,8 +128,13 @@ def load_compositional_results(results_dir):
     for fname in sorted(os.listdir(results_dir)):
         if fname.startswith("compositional_") and fname.endswith(".json"):
             path = os.path.join(results_dir, fname)
-            with open(path) as f:
-                data = json.load(f)
+            if not os.path.isfile(path):
+                continue
+            try:
+                with open(path) as f:
+                    data = json.load(f)
+            except (json.JSONDecodeError, IOError):
+                continue
             key = fname.replace("compositional_", "").replace(".json", "")
             comp[key] = data
     return comp
@@ -117,7 +174,6 @@ def print_summary_table(results, compositional, output_dir):
         ]
         rows.append(row)
 
-    # Print
     print("\n" + "=" * 120)
     print("RESULTS SUMMARY")
     print("=" * 120)
@@ -127,7 +183,6 @@ def print_summary_table(results, compositional, output_dir):
     for row in rows:
         print(fmt.format(*row))
 
-    # Save CSV
     csv_path = os.path.join(output_dir, "summary.csv")
     with open(csv_path, "w", newline="") as f:
         writer = csv.writer(f)
@@ -136,10 +191,9 @@ def print_summary_table(results, compositional, output_dir):
     print(f"\nSaved: {csv_path}")
 
 
-# ─── Plot 1: Retrieval Comparison (Baseline vs A vs B) ──────────────────────
+# ─── Plot 1: Retrieval Comparison ───────────────────────────────────────────
 
 def plot_retrieval_comparison(results, output_dir):
-    """Bar chart comparing retrieval metrics across main runs."""
     main_runs = {}
     for key in ["baseline", "variant_a", "variant_b"]:
         if key in results:
@@ -181,7 +235,6 @@ def plot_retrieval_comparison(results, output_dir):
 # ─── Plot 2: Lambda Sweep ───────────────────────────────────────────────────
 
 def plot_lambda_sweep(ablations, output_dir):
-    """Line plot of retrieval metrics across lambda values."""
     lambda_runs = {}
     for key, data in ablations.items():
         if key.startswith("lambda_"):
@@ -215,7 +268,6 @@ def plot_lambda_sweep(ablations, output_dir):
 # ─── Plot 3: Masking Rate Sweep ─────────────────────────────────────────────
 
 def plot_maskrate_sweep(ablations, output_dir):
-    """Line plot of retrieval metrics across masking rates."""
     mr_runs = {}
     for key, data in ablations.items():
         if key.startswith("maskrate_"):
@@ -249,7 +301,6 @@ def plot_maskrate_sweep(ablations, output_dir):
 # ─── Plot 4: Training Loss Curves ───────────────────────────────────────────
 
 def plot_loss_curves(results, output_dir):
-    """Training loss over epochs for main runs."""
     fig, axes = plt.subplots(1, 3, figsize=(14, 4))
     loss_keys = [("l_total", "Total Loss"), ("l_token_cls", "Token Cls Loss"),
                  ("l_recon", "Recon Loss")]
@@ -282,7 +333,6 @@ def plot_loss_curves(results, output_dir):
 # ─── Plot 5: Compositional Evaluation ───────────────────────────────────────
 
 def plot_compositional(compositional, output_dir):
-    """Bar chart of compositional benchmark scores."""
     if not compositional:
         print("  [SKIP] No compositional results found")
         return
@@ -290,7 +340,6 @@ def plot_compositional(compositional, output_dir):
     metrics_to_plot = []
     metric_labels = []
 
-    # Check which metrics are available
     sample = list(compositional.values())[0]
     if "winoground_group_score" in sample:
         metrics_to_plot.append("winoground_group_score")
@@ -359,10 +408,8 @@ def main():
     print(f"  Ablations: {list(ablation_results.keys())}")
     print(f"  Compositional: {list(compositional_results.keys())}")
 
-    # Summary table
     print_summary_table(main_results, compositional_results, args.output_dir)
 
-    # Plots
     print("\nGenerating plots...")
     plot_retrieval_comparison(main_results, args.output_dir)
     plot_loss_curves(main_results, args.output_dir)
