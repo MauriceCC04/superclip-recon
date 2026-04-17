@@ -551,6 +551,40 @@ def test_slurm_scripts_parseable():
             f"{fname} does not source common.sh — will break if sbatch'd from wrong CWD"
 
 
+@test("18. run_retrieval_eval completes end-to-end on synthetic val")
+def test_run_retrieval_eval_e2e():
+    """Regression test for the evaluate.py indentation bug.
+
+    Previously, the entire retrieval pipeline was nested inside the
+    caption-collection loop, causing it to execute per-annotation instead
+    of once. With that bug present, the very first iteration raises
+    RuntimeError (only 1 image in img_id_to_caps yet but N_CAPS_PER_IMAGE=5
+    uniformity check runs against all image_ids).
+
+    NOTE: environment-dependent — builds SuperCLIPRecon which needs CLIP
+    weights cached or internet. Same bucket as tests 04, 10, 11.
+    """
+    from config import Config
+    from model import SuperCLIPRecon
+    from evaluate import run_retrieval_eval
+
+    cfg = Config()
+    cfg.data.coco_root = TEST_DATA_ROOT
+    cfg.data.num_workers = 0
+    cfg.model.num_token_classes = 50
+
+    model = SuperCLIPRecon(cfg).to(DEVICE)
+
+    # Synthetic val has 8 images × 5 captions each (see create_test_data).
+    metrics = run_retrieval_eval(model, cfg, DEVICE, max_images=4)
+
+    required_keys = {"i2t_r1", "i2t_r5", "i2t_r10",
+                     "t2i_r1", "t2i_r5", "t2i_r10"}
+    assert required_keys.issubset(metrics.keys()), \
+        f"Missing retrieval keys. Got: {sorted(metrics.keys())}"
+    for k, v in metrics.items():
+        assert 0.0 <= v <= 100.0, f"{k}={v} out of [0, 100] range"
+
 def main():
     all_tests = [v for v in globals().values()
                  if callable(v) and hasattr(v, "test_name")]

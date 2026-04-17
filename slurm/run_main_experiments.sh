@@ -25,6 +25,25 @@
 
 set -euo pipefail
 
+# ============================================================
+# LEGACY GUARD — accidental sbatch protection
+# ============================================================
+if [ "${ALLOW_LEGACY:-0}" != "1" ]; then
+    echo "=============================================================="
+    echo "LEGACY SCRIPT — this chains 3 × 10-epoch runs in ONE 24h job."
+    echo "=============================================================="
+    echo "Preferred workflow (docs/HPC_RUNBOOK.md Gate 4):"
+    echo "    bash slurm/submit_main_experiments.sh"
+    echo ""
+    echo "It submits baseline / variant_a / variant_b as THREE"
+    echo "independent jobs, so a single failure does not kill the others."
+    echo ""
+    echo "If you really want to use this chained runner anyway:"
+    echo "    ALLOW_LEGACY=1 sbatch slurm/run_main_experiments.sh"
+    echo "=============================================================="
+    exit 1
+fi
+
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
 cd "$PROJECT_ROOT"
 

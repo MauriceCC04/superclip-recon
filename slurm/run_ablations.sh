@@ -25,6 +25,23 @@
 
 set -euo pipefail
 
+if [ "${ALLOW_LEGACY:-0}" != "1" ]; then
+    echo "=============================================================="
+    echo "LEGACY SCRIPT — chained ablation runner."
+    echo "=============================================================="
+    echo "Preferred workflow (docs/HPC_RUNBOOK.md Gate 5):"
+    echo "    bash slurm/submit_ablations.sh"
+    echo ""
+    echo "It submits each ablation point as an independent job and"
+    echo "automatically skips configs already covered by main runs."
+    echo ""
+    echo "If you really want the in-process runner (run_ablations.py"
+    echo "with its main-result reuse logic), use:"
+    echo "    ALLOW_LEGACY=1 sbatch slurm/run_ablations.sh"
+    echo "=============================================================="
+    exit 1
+fi
+
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
 cd "$PROJECT_ROOT"
 

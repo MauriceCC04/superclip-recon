@@ -135,8 +135,9 @@ def parse_args():
     parser.add_argument("--save_strategy", type=str, default="last_and_best",
                         choices=["all", "last", "best", "last_and_best"],
                         help="Checkpoint retention strategy (default: last_and_best)")
-    parser.add_argument("--keep_last_k", type=int, default=2,
-                        help="Also keep the K most recent checkpoints (0 to disable)")
+    parser.add_argument("--keep_last_k", type=int, default=1,
+                        help="Also keep the K most recent checkpoints (0 to disable). "
+                             "Default 1 matches submit_main_experiments.sh / submit_ablations.sh.")
     parser.add_argument("--save_optimizer_state", action="store_true", default=False,
                         help="Include optimizer state in checkpoints (doubles size)")
     # --- Eval cost controls ---

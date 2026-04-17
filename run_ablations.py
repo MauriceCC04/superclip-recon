@@ -1,17 +1,23 @@
 """
-Ablation sweep runner for SuperCLIP-Recon.
+[LEGACY] In-process ablation runner for SuperCLIP-Recon.
 
-Runs a compact grid of experiments and collects results in one directory.
-Designed to run inside a single SLURM job — experiments run sequentially.
+STATUS: Not on the documented rollout path.
+    The current workflow (see docs/HPC_RUNBOOK.md Gate 5) is:
+        bash slurm/submit_ablations.sh
+    which submits each ablation point as an independent SLURM job.
+
+This file is preserved for two reasons:
+    1. It implements main-result reuse (copies baseline.json →
+       lambda_0.0.json, etc.) which submit_ablations.sh does not.
+    2. It supports --dry_run for inspecting the grid.
+
+It is only invoked by slurm/run_ablations.sh, which is itself gated
+behind ALLOW_LEGACY=1.
 
 Grid:
-    1. Lambda sweep:        lambda in {0.0, 0.1, 0.5, 1.0}  (Variant A, mask_ratio=0.15)
-    2. Masking rate sweep:  mask_ratio in {0.10, 0.15, 0.25} (Variant A, lambda=0.5)
-    3. Variant comparison:  A vs B                            (lambda=0.5, mask_ratio=0.15)
-
-Usage:
-    python run_ablations.py --coco_root ./data/coco --vocab_path ./vocab.json \
-                            --phrase_path ./phrases.json --results_dir ./results/ablations
+    1. Lambda sweep:       lambda in {0.0, 0.1, 0.5, 1.0}  (Variant A, mask_ratio=0.15)
+    2. Masking rate sweep: mask_ratio in {0.10, 0.15, 0.25} (Variant A, lambda=0.5)
+    3. Variant comparison: A vs B                           (lambda=0.5, mask_ratio=0.15)
 """
 
 import os
