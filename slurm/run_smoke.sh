@@ -14,6 +14,23 @@
 
 set -euo pipefail
 
+if [ "${ALLOW_LEGACY:-0}" != "1" ]; then
+    echo "=============================================================="
+    echo "LEGACY SCRIPT — older smoke harness."
+    echo "=============================================================="
+    echo "Preferred workflow (docs/HPC_RUNBOOK.md Gate 2):"
+    echo "    sbatch slurm/run_gpu_smoke.sh"
+    echo ""
+    echo "It writes results/smoke/gpu_smoke_results.json with peak"
+    echo "memory, checkpoint size, and retrieval metrics — which is"
+    echo "what the runbook inspects."
+    echo ""
+    echo "Override: ALLOW_LEGACY=1 sbatch slurm/run_smoke.sh"
+    echo "=============================================================="
+    exit 1
+fi
+
+
 # Resolve PROJECT_ROOT + cache env from script location
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
 cd "$PROJECT_ROOT"
