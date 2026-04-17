@@ -185,3 +185,5 @@ cython_debug/
 hpc_stuff
 hpc_scratch.txt
 notes.txt
+hpc_notes.txt
+hpc_with_pw.txt
