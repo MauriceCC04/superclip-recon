@@ -20,11 +20,17 @@ import argparse
 import csv
 from collections import defaultdict
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+except ImportError as e:
+    raise SystemExit(
+        "matplotlib is required for analyze_results.py. "
+        "Install it with: pip install 'matplotlib>=3.8.0,<3.10.0' "
+        f"(original error: {e})"
+    )
 import numpy as np
-
 
 # ─── Styling ─────────────────────────────────────────────────────────────────
 

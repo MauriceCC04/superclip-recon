@@ -5,11 +5,18 @@ Runs ALL code paths on tiny synthetic data, on CPU, with no real COCO download.
 Catches shape mismatches, import errors, logic bugs, and pipeline breaks
 BEFORE you waste HPC queue time.
 
+Note:
+    Some tests (04, 04b, 07b, 08, 10, 11) build the SuperCLIP backbone via
+    open_clip. On first run this requires either internet access to fetch
+    OpenCLIP ViT-B/32 weights, or a pre-populated cache (e.g. $HF_HOME,
+    $TORCH_HOME). On an air-gapped machine run `python slurm/cache_clip.py`
+    once on a connected host with the same cache dir, or accept that those
+    tests will fail locally and rely on Gate 1 preflight to cover them.
+
 Usage:
     cd superclip-recon
     python tests/run_tests.py
 """
-
 import os
 import sys
 import json

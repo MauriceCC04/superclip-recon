@@ -32,6 +32,8 @@ print_job_header
 activate_env
 
 ensure_data_file "data/coco/train2017"
+ensure_data_file "data/coco/val2017"
+ensure_data_file "data/coco/annotations/captions_val2017.json"
 ensure_data_file "vocab.json"
 
 mkdir -p checkpoints results

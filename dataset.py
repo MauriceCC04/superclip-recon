@@ -18,8 +18,16 @@ class COCOCaptionsDataset(Dataset):
     """
     Loads COCO images + captions. For each image, randomly picks ONE caption
     per epoch (standard practice for contrastive training).
-    """
 
+    Reproducibility caveat:
+        Caption selection uses the global `random` module seeded once in
+        train.py via set_seed(). Because __getitem__ is called concurrently
+        by DataLoader workers, exact caption assignment per (epoch, image)
+        is NOT reproducible across num_workers > 0 even with the same seed.
+        Retrieval/eval metrics are robust to this (std of final R@1 across
+        reseeds is much smaller than between-variant differences), but if
+        you need bit-exact reproducibility, set num_workers=0.
+    """
     def __init__(self, root, ann_file, image_dir, transform=None, tokenizer=None):
         self.image_root = os.path.join(root, image_dir)
         ann_path = os.path.join(root, ann_file)

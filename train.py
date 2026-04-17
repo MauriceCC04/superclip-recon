@@ -8,16 +8,16 @@ Usage:
     # With reconstruction loss (Variant A):
     python train.py --lambda_recon 0.5 --variant A
 
-    # Variant B (phrase reconstruction):
-    python train.py --lambda_recon 0.5 --variant B --phrase_path ./phrases.json
+    # Variant B (phrase reconstruction, per-caption inline):
+    python train.py --lambda_recon 0.5 --variant B
 
     # Save results to file (for ablation analysis):
     python train.py --lambda_recon 0.5 --results_file ./results/run1.json
 
-    # HPC-safe settings:
-    python train.py --save_strategy last_and_best --keep_last_k 2 \
-                    --no_save_optimizer --eval_max_images 1000
-"""
+    # HPC-safe settings (default: optimizer state NOT saved; pass
+        # --save_optimizer_state to include it):
+        python train.py --save_strategy last_and_best --keep_last_k 2 \
+                        --eval_max_images 1000"""
 
 import os
 import json
@@ -127,7 +127,8 @@ def parse_args():
     parser.add_argument("--results_file", type=str, default=None,
                         help="Path to save final results JSON (for ablation collection)")
     parser.add_argument("--phrase_path", type=str, default=None,
-                        help="Path to phrases.json (optional; Variant B extracts phrases inline)")
+                        help="[DEPRECATED] Ignored. Variant B extracts phrases inline "
+                             "per caption; training does not read phrases.json.")
     parser.add_argument("--use_wandb", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
     # --- Checkpoint retention (HPC safety) ---
@@ -203,17 +204,12 @@ def train():
         drop_last=True,
     )
 
-    # --- Phrase data for Variant B ---
-    phrase_data = None
+    # --- Variant B: phrases are extracted inline per caption (no external file read) ---
     if args.variant == "B":
-        if args.phrase_path is not None and os.path.isfile(args.phrase_path):
-            with open(args.phrase_path) as f:
-                phrase_data = json.load(f)
-            print(f"Loaded phrase data: {sum(len(v) for v in phrase_data.values())} phrases "
-                  "(used as fallback; primary extraction is per-caption)")
-        else:
-            print("Variant B: no phrase_path provided or file missing. "
-                  "Using per-caption inline extraction only.")
+        print("Variant B: phrases are extracted inline per caption by "
+              "create_phrase_mask_from_captions — no external phrases.json is used.")
+        if args.phrase_path is not None:
+            print(f"[DEPRECATED] --phrase_path={args.phrase_path} is ignored by training.")
 
     # --- Optimizer ---
     trainable_params = [p for p in model.parameters() if p.requires_grad]
@@ -245,6 +241,7 @@ def train():
     global_step = 0
     best_metric_epoch = None
     best_metric_val = -1.0
+    ckpt_size_mb = None  # set after first checkpoint is saved
 
     for epoch in range(cfg.train.epochs):
         model.train()
@@ -381,7 +378,7 @@ def train():
         "wall_time_seconds": round(wall_time, 1),
         "trainable_params": n_trainable,
         "save_strategy": args.save_strategy,
-        "checkpoint_size_mb": round(ckpt_size_mb, 1) if 'ckpt_size_mb' in dir() else None,
+        "checkpoint_size_mb": round(ckpt_size_mb, 1) if ckpt_size_mb is not None else None,
         "history": history,
         "final_retrieval": history[-1].get("retrieval", {}),
     }

@@ -8,9 +8,15 @@
 #   bash slurm/setup_env_ready.sh --step cache   # only pre-cache OpenCLIP
 #   bash slurm/setup_env_ready.sh --step data    # only download COCO
 #   bash slurm/setup_env_ready.sh --step vocab   # only build vocab.json
-#   bash slurm/setup_env_ready.sh --step phrases # only extract phrases.json
+#   bash slurm/setup_env_ready.sh --step phrases # (OPTIONAL) extract phrases.json —
+#                                                  NOT used by training; inspection only
 #   bash slurm/setup_env_ready.sh --spacy        # use spaCy for phrases
-#                                                  (default: regex, HPC-friendly)
+#                                                  (default: regex — HPC-friendly,
+#                                                  no extra install, recommended).
+#                                                  --spacy additionally installs
+#                                                  the en_core_web_sm model and
+#                                                  needs internet access during
+#                                                  `--step env`.
 #
 # Each step is idempotent and can be re-run independently.
 # ============================================================
@@ -66,6 +72,9 @@ do_env() {
 
     pip install -r requirements.txt
     if [ "$USE_SPACY" = "1" ]; then
+        # spaCy is not in requirements.txt (kept optional for HPC);
+        # install it only when the user explicitly opts in.
+        pip install "spacy>=3.7.0,<3.9.0"
         python -m spacy download en_core_web_sm
     fi
     echo "[env] Done."
@@ -83,7 +92,8 @@ do_cache() {
 do_data() {
     echo "[data] Downloading COCO..."
     if [ -d "./data/coco/train2017" ] && [ -d "./data/coco/val2017" ] \
-       && [ -f "./data/coco/annotations/captions_train2017.json" ]; then
+       && [ -f "./data/coco/annotations/captions_train2017.json" ] \
+       && [ -f "./data/coco/annotations/captions_val2017.json" ]; then
         echo "[data] COCO already present, skipping."
         return
     fi
@@ -105,7 +115,9 @@ do_vocab() {
 
 # ---------- Step: phrases ----------
 do_phrases() {
-    echo "[phrases] Extracting phrases for Variant B..."
+    echo "[phrases] Extracting phrases (OPTIONAL — not used by training)..."
+    echo "[phrases] Variant B training extracts phrases inline per caption."
+    echo "[phrases] phrases.json is only produced for inspection/debugging."
     if [ -f "./phrases.json" ]; then
         echo "[phrases] phrases.json already exists — re-running (will overwrite)"
     fi
@@ -133,7 +145,9 @@ case "$STEP" in
         do_cache
         do_data
         do_vocab
-        do_phrases
+        # do_phrases is OPTIONAL and not used by training. Run it explicitly via
+        # `bash slurm/setup_env_ready.sh --step phrases` if you want phrases.json
+        # for debugging or inspection.
         ;;
     *)
         echo "Unknown step: $STEP"; exit 1 ;;
