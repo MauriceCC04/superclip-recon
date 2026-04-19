@@ -255,6 +255,5 @@ At several points during the project, tempting-looking extensions (λ=2.0, λ=2.
 
 Things that remain unresolved at the time of writing, for the next person to pick up:
 
-- **gnode04 health.** Reported to HPC support. `--exclude=gnode04` should be removed from submissions once HPC confirms the node is fixed. Until then, the workaround is the default.
 - **`submit_ablations.sh` behavior under QoS limits.** The script does not currently back off when submissions are rejected; it just fails for all ablations past the first two. Not worth fixing now — the documented workaround (submit one at a time with wrapped `sbatch`) is reliable — but a future maintainer could add retry-with-backoff.
 - **Checkpoint retention edge case (C2).** `keep_last_k` + `best` interaction occasionally leaves one stray intermediate checkpoint. Bounded cost, works around manually. A small `tests/run_tests.py` addition could pin this down if the project is extended.
