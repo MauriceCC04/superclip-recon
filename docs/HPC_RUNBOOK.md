@@ -1,6 +1,6 @@
 # HPC Runbook — SuperCLIP-Recon (Bocconi, updated)
 
-**Target cluster**: partition `stud`, account `3202029`, QoS `stud`, one MIG-sliced A100 40GB (`gpu:4g.40gb:1`), home-quota-limited storage, no separate scratch assumed.
+**Target cluster**: partition `stud`, account `<USER_ID>`, QoS `stud`, one MIG-sliced A100 40GB (`gpu:4g.40gb:1`), home-quota-limited storage, no separate scratch assumed.
 
 This runbook keeps the original **gated** flow, but updates it with what actually worked on Bocconi:
 
@@ -14,7 +14,7 @@ This runbook keeps the original **gated** flow, but updates it with what actuall
 **Important Bocconi-specific note**: the safest submission pattern is:
 
 ```bash
-sbatch --wrap='cd /mnt/beegfsstudents/home/3202029/superclip-recon && bash slurm/<script>.sh'
+sbatch --wrap='cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon && bash slurm/<script>.sh'
 ```
 
 Direct `sbatch slurm/<script>.sh` can fail with a `/var/spool/.../common.sh: No such file or directory` error if the job starts from SLURM’s spool directory instead of the repo root.
@@ -42,21 +42,21 @@ rsync -av \
   --exclude 'checkpoints' \
   --exclude 'results' \
   ~/PycharmProjects/superclip-recon/ \
-  bocconi-hpc:/mnt/beegfsstudents/home/3202029/superclip-recon/
+  bocconi-hpc:/mnt/beegfsstudents/home/<USER_ID>/superclip-recon/
 ```
 
 Then connect:
 
 ```bash
 ssh bocconi-hpc
-cd /mnt/beegfsstudents/home/3202029/superclip-recon
+cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon
 ```
 
 If the alias is not configured, use:
 
 ```bash
 ssh <username>@slogin.hpc.unibocconi.it
-cd /mnt/beegfsstudents/home/3202029/superclip-recon
+cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon
 ```
 
 Do **not** use a command like this from your Mac:
@@ -92,7 +92,7 @@ python tests/run_tests.py
 ### One-time setup on Bocconi
 
 ```bash
-cd /mnt/beegfsstudents/home/3202029/superclip-recon
+cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon
 
 module load miniconda3
 conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
@@ -126,24 +126,24 @@ ls vocab.json
 ```bash
 sbatch \
   --job-name=superclip-preflight \
-  --account=3202029 \
+  --account=<USER_ID> \
   --partition=stud \
   --qos=stud \
   --output=out/%x_%j.out \
   --error=err/%x_%j.err \
   --mail-type=END,FAIL \
-  --mail-user=3202029@studbocconi.it \
+  --mail-user=<USER_ID>@studbocconi.it \
   --time=00:30:00 \
   --gres=gpu:4g.40gb:1 \
   --cpus-per-task=4 \
   --mem=16G \
-  --wrap='cd /mnt/beegfsstudents/home/3202029/superclip-recon && bash slurm/run_preflight.sh'
+  --wrap='cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon && bash slurm/run_preflight.sh'
 ```
 
 Monitor and inspect:
 
 ```bash
-squeue -u 3202029
+squeue -u <USER_ID>
 tail -f out/superclip-preflight_<JOBID>.out
 cat results/preflight/preflight_report.json | python -m json.tool | head -80
 ```
@@ -167,24 +167,24 @@ Use the preferred smoke script, not legacy `run_smoke.sh`:
 ```bash
 sbatch \
   --job-name=superclip-gpusmoke \
-  --account=3202029 \
+  --account=<USER_ID> \
   --partition=stud \
   --qos=stud \
   --output=out/%x_%j.out \
   --error=err/%x_%j.err \
   --mail-type=END,FAIL \
-  --mail-user=3202029@studbocconi.it \
+  --mail-user=<USER_ID>@studbocconi.it \
   --time=00:30:00 \
   --gres=gpu:4g.40gb:1 \
   --cpus-per-task=4 \
   --mem=16G \
-  --wrap='cd /mnt/beegfsstudents/home/3202029/superclip-recon && bash slurm/run_gpu_smoke.sh'
+  --wrap='cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon && bash slurm/run_gpu_smoke.sh'
 ```
 
 Monitor and inspect:
 
 ```bash
-squeue -u 3202029
+squeue -u <USER_ID>
 tail -f out/superclip-gpusmoke_<JOBID>.out
 cat results/smoke/gpu_smoke_results.json | python -m json.tool | head -80
 ```
@@ -205,24 +205,24 @@ What you want:
 ```bash
 sbatch \
   --job-name=superclip-pilot \
-  --account=3202029 \
+  --account=<USER_ID> \
   --partition=stud \
   --qos=stud \
   --output=out/%x_%j.out \
   --error=err/%x_%j.err \
   --mail-type=END,FAIL \
-  --mail-user=3202029@studbocconi.it \
+  --mail-user=<USER_ID>@studbocconi.it \
   --time=04:00:00 \
   --gres=gpu:4g.40gb:1 \
   --cpus-per-task=8 \
   --mem=32G \
-  --wrap='cd /mnt/beegfsstudents/home/3202029/superclip-recon && bash slurm/run_pilot_baseline.sh'
+  --wrap='cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon && bash slurm/run_pilot_baseline.sh'
 ```
 
 On Bocconi, long-running training progress is usually visible in `err/<job>_<jobid>.err`, because `tqdm` progress bars and warnings go to stderr.
 
 ```bash
-squeue -u 3202029
+squeue -u <USER_ID>
 tail -f err/superclip-pilot_<JOBID>.err
 cat results/pilot/pilot_baseline.json | python -m json.tool | head -80
 ```
@@ -264,18 +264,18 @@ You can still use `bash slurm/submit_main_experiments.sh`, but the safest docume
 ```bash
 sbatch \
   --job-name=superclip-baseline \
-  --account=3202029 \
+  --account=<USER_ID> \
   --partition=stud \
   --qos=stud \
   --output=out/%x_%j.out \
   --error=err/%x_%j.err \
   --mail-type=END,FAIL \
-  --mail-user=3202029@studbocconi.it \
+  --mail-user=<USER_ID>@studbocconi.it \
   --time=12:00:00 \
   --gres=gpu:4g.40gb:1 \
   --cpus-per-task=8 \
   --mem=32G \
-  --wrap='cd /mnt/beegfsstudents/home/3202029/superclip-recon && export RUN_NAME=baseline VARIANT=A LAMBDA_RECON=0.0 MASK_RATIO=0.15 SAVE_DIR=./checkpoints/baseline RESULTS_FILE=./results/baseline.json SAVE_STRATEGY=last_and_best KEEP_LAST_K=1 EVAL_MAX_IMAGES=5000 && bash slurm/run_one_experiment.sh'
+  --wrap='cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon && export RUN_NAME=baseline VARIANT=A LAMBDA_RECON=0.0 MASK_RATIO=0.15 SAVE_DIR=./checkpoints/baseline RESULTS_FILE=./results/baseline.json SAVE_STRATEGY=last_and_best KEEP_LAST_K=1 EVAL_MAX_IMAGES=5000 && bash slurm/run_one_experiment.sh'
 ```
 
 #### Variant A
@@ -283,18 +283,18 @@ sbatch \
 ```bash
 sbatch \
   --job-name=superclip-variant_a \
-  --account=3202029 \
+  --account=<USER_ID> \
   --partition=stud \
   --qos=stud \
   --output=out/%x_%j.out \
   --error=err/%x_%j.err \
   --mail-type=END,FAIL \
-  --mail-user=3202029@studbocconi.it \
+  --mail-user=<USER_ID>@studbocconi.it \
   --time=12:00:00 \
   --gres=gpu:4g.40gb:1 \
   --cpus-per-task=8 \
   --mem=32G \
-  --wrap='cd /mnt/beegfsstudents/home/3202029/superclip-recon && export RUN_NAME=variant_a VARIANT=A LAMBDA_RECON=0.5 MASK_RATIO=0.15 SAVE_DIR=./checkpoints/variant_a RESULTS_FILE=./results/variant_a.json SAVE_STRATEGY=last_and_best KEEP_LAST_K=1 EVAL_MAX_IMAGES=5000 && bash slurm/run_one_experiment.sh'
+  --wrap='cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon && export RUN_NAME=variant_a VARIANT=A LAMBDA_RECON=0.5 MASK_RATIO=0.15 SAVE_DIR=./checkpoints/variant_a RESULTS_FILE=./results/variant_a.json SAVE_STRATEGY=last_and_best KEEP_LAST_K=1 EVAL_MAX_IMAGES=5000 && bash slurm/run_one_experiment.sh'
 ```
 
 #### Variant B
@@ -302,24 +302,24 @@ sbatch \
 ```bash
 sbatch \
   --job-name=superclip-variant_b \
-  --account=3202029 \
+  --account=<USER_ID> \
   --partition=stud \
   --qos=stud \
   --output=out/%x_%j.out \
   --error=err/%x_%j.err \
   --mail-type=END,FAIL \
-  --mail-user=3202029@studbocconi.it \
+  --mail-user=<USER_ID>@studbocconi.it \
   --time=12:00:00 \
   --gres=gpu:4g.40gb:1 \
   --cpus-per-task=8 \
   --mem=32G \
-  --wrap='cd /mnt/beegfsstudents/home/3202029/superclip-recon && export RUN_NAME=variant_b VARIANT=B LAMBDA_RECON=0.5 MASK_RATIO=0.15 PHRASE_PATH=./phrases.json SAVE_DIR=./checkpoints/variant_b RESULTS_FILE=./results/variant_b.json SAVE_STRATEGY=last_and_best KEEP_LAST_K=1 EVAL_MAX_IMAGES=5000 && bash slurm/run_one_experiment.sh'
+  --wrap='cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon && export RUN_NAME=variant_b VARIANT=B LAMBDA_RECON=0.5 MASK_RATIO=0.15 PHRASE_PATH=./phrases.json SAVE_DIR=./checkpoints/variant_b RESULTS_FILE=./results/variant_b.json SAVE_STRATEGY=last_and_best KEEP_LAST_K=1 EVAL_MAX_IMAGES=5000 && bash slurm/run_one_experiment.sh'
 ```
 
 ### Monitoring
 
 ```bash
-squeue -u 3202029
+squeue -u <USER_ID>
 tail -f err/superclip-baseline_<JOBID>.err
 tail -f err/superclip-variant_a_<JOBID>.err
 tail -f err/superclip-variant_b_<JOBID>.err
@@ -328,7 +328,7 @@ tail -f err/superclip-variant_b_<JOBID>.err
 ### Inspect results
 
 ```bash
-cd /mnt/beegfsstudents/home/3202029/superclip-recon
+cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon
 ls -lh results/baseline.json results/variant_a.json results/variant_b.json
 python -m json.tool results/baseline.json | head -40
 python -m json.tool results/variant_a.json | head -40
@@ -352,18 +352,18 @@ Do **not** rely on `run_one_experiment.sh` for this if you need a custom seed. S
 ```bash
 sbatch \
   --job-name=superclip-baseline-s43-b128 \
-  --account=3202029 \
+  --account=<USER_ID> \
   --partition=stud \
   --qos=stud \
   --output=out/%x_%j.out \
   --error=err/%x_%j.err \
   --mail-type=END,FAIL \
-  --mail-user=3202029@studbocconi.it \
+  --mail-user=<USER_ID>@studbocconi.it \
   --time=12:00:00 \
   --gres=gpu:4g.40gb:1 \
   --cpus-per-task=8 \
   --mem=32G \
-  --wrap='cd /mnt/beegfsstudents/home/3202029/superclip-recon && source slurm/common.sh && cd "$PROJECT_ROOT" && print_job_header && activate_env && ensure_data_file data/coco/train2017 && ensure_data_file data/coco/val2017 && ensure_data_file data/coco/annotations/captions_val2017.json && ensure_data_file vocab.json && python train.py --coco_root ./data/coco --vocab_path ./vocab.json --run_name baseline_s43_b128 --variant A --lambda_recon 0.0 --mask_ratio 0.15 --epochs 10 --batch_size 128 --lr 1e-5 --eval_max_images 5000 --save_strategy last_and_best --keep_last_k 1 --seed 43 --save_dir ./checkpoints/baseline_s43_b128 --results_file ./results/baseline_s43_b128.json'
+  --wrap='cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon && source slurm/common.sh && cd "$PROJECT_ROOT" && print_job_header && activate_env && ensure_data_file data/coco/train2017 && ensure_data_file data/coco/val2017 && ensure_data_file data/coco/annotations/captions_val2017.json && ensure_data_file vocab.json && python train.py --coco_root ./data/coco --vocab_path ./vocab.json --run_name baseline_s43_b128 --variant A --lambda_recon 0.0 --mask_ratio 0.15 --epochs 10 --batch_size 128 --lr 1e-5 --eval_max_images 5000 --save_strategy last_and_best --keep_last_k 1 --seed 43 --save_dir ./checkpoints/baseline_s43_b128 --results_file ./results/baseline_s43_b128.json'
 ```
 
 #### Lambda 1.0, seed 43, batch 128
@@ -371,18 +371,18 @@ sbatch \
 ```bash
 sbatch \
   --job-name=superclip-lambda1p0-s43-b128 \
-  --account=3202029 \
+  --account=<USER_ID> \
   --partition=stud \
   --qos=stud \
   --output=out/%x_%j.out \
   --error=err/%x_%j.err \
   --mail-type=END,FAIL \
-  --mail-user=3202029@studbocconi.it \
+  --mail-user=<USER_ID>@studbocconi.it \
   --time=12:00:00 \
   --gres=gpu:4g.40gb:1 \
   --cpus-per-task=8 \
   --mem=32G \
-  --wrap='cd /mnt/beegfsstudents/home/3202029/superclip-recon && source slurm/common.sh && cd "$PROJECT_ROOT" && print_job_header && activate_env && ensure_data_file data/coco/train2017 && ensure_data_file data/coco/val2017 && ensure_data_file data/coco/annotations/captions_val2017.json && ensure_data_file vocab.json && python train.py --coco_root ./data/coco --vocab_path ./vocab.json --run_name lambda_1.0_s43_b128 --variant A --lambda_recon 1.0 --mask_ratio 0.15 --epochs 10 --batch_size 128 --lr 1e-5 --eval_max_images 5000 --save_strategy last_and_best --keep_last_k 1 --seed 43 --save_dir ./checkpoints/ablations/lambda_1.0_s43_b128 --results_file ./results/ablations/lambda_1.0_s43_b128.json'
+  --wrap='cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon && source slurm/common.sh && cd "$PROJECT_ROOT" && print_job_header && activate_env && ensure_data_file data/coco/train2017 && ensure_data_file data/coco/val2017 && ensure_data_file data/coco/annotations/captions_val2017.json && ensure_data_file vocab.json && python train.py --coco_root ./data/coco --vocab_path ./vocab.json --run_name lambda_1.0_s43_b128 --variant A --lambda_recon 1.0 --mask_ratio 0.15 --epochs 10 --batch_size 128 --lr 1e-5 --eval_max_images 5000 --save_strategy last_and_best --keep_last_k 1 --seed 43 --save_dir ./checkpoints/ablations/lambda_1.0_s43_b128 --results_file ./results/ablations/lambda_1.0_s43_b128.json'
 ```
 
 This is the preferred pattern whenever you need **clean seed comparisons**.
@@ -409,7 +409,7 @@ df -h $HOME
 
 ```bash
 bash slurm/submit_ablations.sh
-squeue -u 3202029
+squeue -u <USER_ID>
 ```
 
 If some submissions fail with `QOSMaxSubmitJobPerUserLimit`, that is a cluster policy issue, not necessarily a code issue. Let one running job finish, then resubmit the missing informative points.
@@ -442,13 +442,13 @@ Create a temporary script file rather than pasting a huge inline `--wrap` comman
 cat > slurm/run_comp_eval_matched.sh <<'SCRIPT_EOF'
 #!/usr/bin/env bash
 #SBATCH --job-name=superclip-comp-s43
-#SBATCH --account=3202029
+#SBATCH --account=<USER_ID>
 #SBATCH --partition=stud
 #SBATCH --qos=stud
 #SBATCH --output=out/%x_%j.out
 #SBATCH --error=err/%x_%j.err
 #SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=3202029@studbocconi.it
+#SBATCH --mail-user=<USER_ID>@studbocconi.it
 #SBATCH --time=08:00:00
 #SBATCH --gres=gpu:4g.40gb:1
 #SBATCH --cpus-per-task=4
@@ -456,7 +456,7 @@ cat > slurm/run_comp_eval_matched.sh <<'SCRIPT_EOF'
 
 set -euo pipefail
 
-cd /mnt/beegfsstudents/home/3202029/superclip-recon
+cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon
 source slurm/common.sh
 cd "$PROJECT_ROOT"
 
@@ -529,7 +529,7 @@ fix storage **before** trying to submit more jobs or create more scripts.
 ### Running jobs
 
 ```bash
-squeue -u 3202029
+squeue -u <USER_ID>
 tail -f err/<JOBNAME>_<JOBID>.err
 tail -f out/<JOBNAME>_<JOBID>.out
 ```
@@ -547,7 +547,7 @@ sacct -j <JOBID> --format=JobID,State,Elapsed,ExitCode
 ### Always `cd` into the repo first
 
 ```bash
-cd /mnt/beegfsstudents/home/3202029/superclip-recon
+cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon
 ```
 
 Otherwise `tail`, `cat`, or `python -m json.tool` may look in the wrong place.
@@ -601,7 +601,7 @@ conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
 Submit with:
 
 ```bash
-sbatch --wrap='cd /mnt/beegfsstudents/home/3202029/superclip-recon && bash slurm/<script>.sh'
+sbatch --wrap='cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon && bash slurm/<script>.sh'
 ```
 
 ### `QOSMaxSubmitJobPerUserLimit` or `QOSMaxJobsPerUserLimit`
@@ -648,8 +648,8 @@ When jobs are finished:
 
 ```bash
 exit
-rsync -av bocconi-hpc:/mnt/beegfsstudents/home/3202029/superclip-recon/results/ ~/PycharmProjects/superclip-recon/results/
-rsync -av bocconi-hpc:/mnt/beegfsstudents/home/3202029/superclip-recon/checkpoints/ ~/PycharmProjects/superclip-recon/checkpoints/
+rsync -av bocconi-hpc:/mnt/beegfsstudents/home/<USER_ID>/superclip-recon/results/ ~/PycharmProjects/superclip-recon/results/
+rsync -av bocconi-hpc:/mnt/beegfsstudents/home/<USER_ID>/superclip-recon/checkpoints/ ~/PycharmProjects/superclip-recon/checkpoints/
 ```
 
 You can close the terminal after submission; SLURM jobs continue running after your SSH session ends.
