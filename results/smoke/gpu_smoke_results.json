@@ -1,0 +1,56 @@
+{
+  "run_name": "smoke_test",
+  "variant": "A",
+  "steps": 5,
+  "batch_size": 32,
+  "lr": 1e-05,
+  "mask_ratio": 0.15,
+  "lambda_recon": 0.5,
+  "seed": 42,
+  "trainable_params": 114004712,
+  "wall_time_seconds": 10.2,
+  "eval_seconds": 2.7,
+  "gpu_peak_mem_gb": 3.076,
+  "checkpoint_size_mb": 677.0,
+  "step_logs": [
+    {
+      "step": 1,
+      "l_token_cls": 0.6931703090667725,
+      "l_recon": 10.818181991577148,
+      "l_total": 6.102261543273926
+    },
+    {
+      "step": 2,
+      "l_token_cls": 0.6930435299873352,
+      "l_recon": 10.806293487548828,
+      "l_total": 6.096190452575684
+    },
+    {
+      "step": 3,
+      "l_token_cls": 0.6928864121437073,
+      "l_recon": 10.798202514648438,
+      "l_total": 6.091987609863281
+    },
+    {
+      "step": 4,
+      "l_token_cls": 0.6927299499511719,
+      "l_recon": 10.802271842956543,
+      "l_total": 6.093865871429443
+    },
+    {
+      "step": 5,
+      "l_token_cls": 0.6925613284111023,
+      "l_recon": 10.803711891174316,
+      "l_total": 6.094417095184326
+    }
+  ],
+  "retrieval": {
+    "i2t_r1": 86.71875,
+    "t2i_r1": 71.25,
+    "i2t_r5": 100.0,
+    "t2i_r5": 97.65625,
+    "i2t_r10": 100.0,
+    "t2i_r10": 99.0625
+  },
+  "checkpoint": "./checkpoints/smoke/smoke_step.pt"
+}
