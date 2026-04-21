@@ -1,45 +1,48 @@
 """
 Training script for SuperCLIP-Recon.
 
-Usage:
-    # Baseline only (lambda=0):
-    python train.py --lambda_recon 0.0
+Modes:
+    - auto (default): lambda_recon == 0 -> superclip_baseline,
+                      lambda_recon  > 0 -> superclip_recon
+    - clip_only: train only the CLIP contrastive objective
+    - superclip_baseline: CLIP contrastive + token classification
+    - superclip_recon: CLIP contrastive + token classification + reconstruction
 
-    # With reconstruction loss (Variant A):
-    python train.py --lambda_recon 0.5 --variant A
-
-    # Variant B (phrase reconstruction, per-caption inline):
-    python train.py --lambda_recon 0.5 --variant B
-
-    # Save results to file (for ablation analysis):
-    python train.py --lambda_recon 0.5 --results_file ./results/run1.json
-
-    # HPC-safe settings (default: optimizer state NOT saved; pass
-        # --save_optimizer_state to include it):
-        python train.py --save_strategy last_and_best --keep_last_k 2 \
-                        --eval_max_images 1000"""
+The key repair in this version is that lambda=0 is now a real SuperCLIP-style
+baseline rather than image-only token classification.
+"""
 
 import os
 import json
 import time
+import math
 import argparse
 import random
 import glob
+from contextlib import nullcontext
+
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import LambdaLR
+from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
 
 from config import Config
 from dataset import COCOCaptionsDataset
 from model import SuperCLIPRecon
 from losses import (
-    build_token_labels, create_mask,
-    create_phrase_mask_from_captions, total_loss,
+    build_token_labels,
+    create_mask,
+    create_phrase_mask_from_captions,
+    total_loss,
+    resolve_train_mode,
 )
 from build_vocab import load_vocab
 from evaluate import run_retrieval_eval
+
+
+RETRIEVAL_KEYS = ["i2t_r1", "i2t_r5", "i2t_r10", "t2i_r1", "t2i_r5", "t2i_r10"]
 
 
 def set_seed(seed: int):
@@ -50,9 +53,6 @@ def set_seed(seed: int):
 
 
 def build_warmup_scheduler(optimizer, warmup_steps: int, total_steps: int):
-    """
-    Linear warmup for `warmup_steps`, then linear decay to 0 over the rest.
-    """
     if warmup_steps <= 0:
         return LambdaLR(optimizer, lr_lambda=lambda _: 1.0)
 
@@ -67,49 +67,33 @@ def build_warmup_scheduler(optimizer, warmup_steps: int, total_steps: int):
     return LambdaLR(optimizer, lr_lambda=lr_lambda)
 
 
-# ─── Checkpoint retention ────────────────────────────────────────────────────
-
-def manage_checkpoints(save_dir, save_strategy, keep_last_k, current_epoch,
-                       best_metric_epoch):
-    """
-    Delete old checkpoints according to retention policy.
-
-    save_strategy:
-        all            — keep every epoch checkpoint
-        last           — keep only the latest checkpoint
-        best           — keep only the best checkpoint
-        last_and_best  — keep latest + best (default, safest for HPC)
-
-    keep_last_k: when > 0, also keep the most recent K checkpoints
-                 regardless of strategy (extra safety net).
-    """
+def manage_checkpoints(save_dir, save_strategy, keep_last_k, current_epoch, best_metric_epoch):
     if save_strategy == "all":
-        return  # keep everything
+        return
 
     ckpt_files = sorted(glob.glob(os.path.join(save_dir, "epoch_*.pt")))
     if not ckpt_files:
         return
 
     keep = set()
-
-    # Always keep current epoch
     current_path = os.path.join(save_dir, f"epoch_{current_epoch}.pt")
     keep.add(current_path)
 
-    # Keep best if strategy includes it
     if save_strategy in ("best", "last_and_best") and best_metric_epoch is not None:
         best_path = os.path.join(save_dir, f"epoch_{best_metric_epoch}.pt")
         keep.add(best_path)
 
-    # Keep last K
     if keep_last_k > 0:
-        for p in ckpt_files[-keep_last_k:]:
-            keep.add(p)
+        for path in ckpt_files[-keep_last_k:]:
+            keep.add(path)
 
-    # Delete the rest
-    for p in ckpt_files:
-        if p not in keep and os.path.isfile(p):
-            os.remove(p)
+    for path in ckpt_files:
+        if path not in keep and os.path.isfile(path):
+            os.remove(path)
+
+
+def retrieval_score(metrics: dict) -> float:
+    return float(sum(metrics.get(key, 0.0) for key in RETRIEVAL_KEYS))
 
 
 def parse_args():
@@ -117,6 +101,15 @@ def parse_args():
     parser.add_argument("--coco_root", type=str, default="./data/coco")
     parser.add_argument("--vocab_path", type=str, default="./vocab.json")
     parser.add_argument("--lambda_recon", type=float, default=0.5)
+    parser.add_argument("--lambda_clip", type=float, default=1.0)
+    parser.add_argument("--lambda_token_cls", type=float, default=1.0)
+    parser.add_argument(
+        "--train_mode",
+        type=str,
+        default="auto",
+        choices=["auto", "clip_only", "superclip_baseline", "superclip_recon"],
+        help="Training objective. auto resolves to baseline when lambda_recon=0, otherwise recon.",
+    )
     parser.add_argument("--variant", type=str, default="A", choices=["A", "B"])
     parser.add_argument("--mask_ratio", type=float, default=0.15)
     parser.add_argument("--batch_size", type=int, default=128)
@@ -124,29 +117,20 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--save_dir", type=str, default="./checkpoints")
     parser.add_argument("--run_name", type=str, default="superclip-recon")
-    parser.add_argument("--results_file", type=str, default=None,
-                        help="Path to save final results JSON (for ablation collection)")
-    parser.add_argument("--phrase_path", type=str, default=None,
-                        help="[DEPRECATED] Ignored. Variant B extracts phrases inline "
-                             "per caption; training does not read phrases.json.")
+    parser.add_argument("--results_file", type=str, default=None)
+    parser.add_argument("--phrase_path", type=str, default=None, help="Deprecated. Variant B extracts phrases inline.")
     parser.add_argument("--use_wandb", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
-    # --- Checkpoint retention (HPC safety) ---
-    parser.add_argument("--save_strategy", type=str, default="last_and_best",
-                        choices=["all", "last", "best", "last_and_best"],
-                        help="Checkpoint retention strategy (default: last_and_best)")
-    parser.add_argument("--keep_last_k", type=int, default=1,
-                        help="Also keep the K most recent checkpoints (0 to disable). "
-                             "Default 1 matches submit_main_experiments.sh / submit_ablations.sh.")
-    parser.add_argument("--save_optimizer_state", action="store_true", default=False,
-                        help="Include optimizer state in checkpoints (doubles size)")
-    # --- Eval cost controls ---
-    parser.add_argument("--eval_every_epoch", type=int, default=1,
-                        help="Run retrieval eval every N epochs (default: 1)")
-    parser.add_argument("--eval_max_images", type=int, default=5000,
-                        help="Max images for retrieval eval (default: 5000 = full COCO val)")
-    parser.add_argument("--skip_eval", action="store_true",
-                        help="Skip retrieval evaluation entirely")
+    parser.add_argument("--freeze_text_tower", action="store_true")
+    parser.add_argument("--freeze_vision_tower", action="store_true")
+    parser.add_argument("--freeze_logit_scale", action="store_true")
+    parser.add_argument("--no_amp", action="store_true", help="Disable CUDA AMP.")
+    parser.add_argument("--save_strategy", type=str, default="last_and_best", choices=["all", "last", "best", "last_and_best"])
+    parser.add_argument("--keep_last_k", type=int, default=1)
+    parser.add_argument("--save_optimizer_state", action="store_true", default=False)
+    parser.add_argument("--eval_every_epoch", type=int, default=1)
+    parser.add_argument("--eval_max_images", type=int, default=5000)
+    parser.add_argument("--skip_eval", action="store_true")
     return parser.parse_args()
 
 
@@ -154,11 +138,13 @@ def train():
     args = parse_args()
     wall_start = time.time()
 
-    # --- Config ---
     cfg = Config()
     cfg.data.coco_root = args.coco_root
     cfg.model.mask_ratio = args.mask_ratio
     cfg.model.variant = args.variant
+    cfg.train.train_mode = resolve_train_mode(args.train_mode, args.lambda_recon)
+    cfg.train.lambda_clip = args.lambda_clip
+    cfg.train.lambda_token_cls = args.lambda_token_cls
     cfg.train.lambda_recon = args.lambda_recon
     cfg.train.batch_size = args.batch_size
     cfg.train.epochs = args.epochs
@@ -168,27 +154,39 @@ def train():
     cfg.train.use_wandb = args.use_wandb
     cfg.train.seed = args.seed
     cfg.train.eval_every_epoch = args.eval_every_epoch
+    cfg.train.freeze_text_tower = args.freeze_text_tower
+    cfg.train.freeze_vision_tower = args.freeze_vision_tower
+    cfg.train.freeze_logit_scale = args.freeze_logit_scale
+    cfg.train.use_amp = not args.no_amp
 
     set_seed(cfg.train.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}")
-    print(f"Run: {args.run_name} | variant={args.variant} | "
-          f"lambda={args.lambda_recon} | mask_ratio={args.mask_ratio}")
-    print(f"Checkpoint strategy: {args.save_strategy} | keep_last_k={args.keep_last_k} | "
-          f"save_optimizer={args.save_optimizer_state}")
+    amp_enabled = device.type == "cuda" and cfg.train.use_amp
+    scaler = GradScaler(enabled=amp_enabled)
 
-    # --- Vocab (load early so we can set head size before model creation) ---
+    print(f"Device: {device}")
+    print(
+        f"Run: {args.run_name} | mode={cfg.train.train_mode} | variant={args.variant} | "
+        f"lambda_clip={cfg.train.lambda_clip} | lambda_tc={cfg.train.lambda_token_cls} | "
+        f"lambda_recon={cfg.train.lambda_recon} | mask_ratio={args.mask_ratio}"
+    )
+    print(
+        f"Freeze flags: text={cfg.train.freeze_text_tower} | vision={cfg.train.freeze_vision_tower} | "
+        f"logit_scale={cfg.train.freeze_logit_scale} | amp={amp_enabled}"
+    )
+    print(
+        f"Checkpoint strategy: {args.save_strategy} | keep_last_k={args.keep_last_k} | "
+        f"save_optimizer={args.save_optimizer_state}"
+    )
+
     vocab_map = load_vocab(args.vocab_path)
     cfg.model.num_token_classes = len(vocab_map)
-    print(f"Loaded vocab with {len(vocab_map)} token classes "
-          f"(num_token_classes set to {cfg.model.num_token_classes})")
+    print(f"Loaded vocab with {len(vocab_map)} token classes")
 
-    # --- Model ---
     model = SuperCLIPRecon(cfg).to(device)
     n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model created. Trainable params: {n_trainable:,}")
 
-    # --- Data ---
     train_dataset = COCOCaptionsDataset(
         root=cfg.data.coco_root,
         ann_file=cfg.data.train_ann,
@@ -205,158 +203,175 @@ def train():
         drop_last=True,
     )
 
-    # --- Variant B: phrases are extracted inline per caption (no external file read) ---
     if args.variant == "B":
-        print("Variant B: phrases are extracted inline per caption by "
-              "create_phrase_mask_from_captions — no external phrases.json is used.")
+        print("Variant B: phrases are extracted inline per caption.")
         if args.phrase_path is not None:
             print(f"[DEPRECATED] --phrase_path={args.phrase_path} is ignored by training.")
 
-    # --- Optimizer ---
     trainable_params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = torch.optim.AdamW(
-        trainable_params, lr=cfg.train.lr, weight_decay=cfg.train.weight_decay
-    )
+    optimizer = torch.optim.AdamW(trainable_params, lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
 
-    # --- Warmup scheduler ---
     steps_per_epoch = len(train_loader)
     total_steps = steps_per_epoch * cfg.train.epochs
     scheduler = build_warmup_scheduler(optimizer, cfg.train.warmup_steps, total_steps)
-    print(f"Scheduler: linear warmup for {cfg.train.warmup_steps} steps, "
-          f"then linear decay over {total_steps} total steps")
+    print(f"Scheduler: linear warmup for {cfg.train.warmup_steps} steps, then linear decay over {total_steps} total steps")
 
-    # --- Optional: wandb ---
     if cfg.train.use_wandb:
         import wandb
-        wandb.init(project="superclip-recon", name=cfg.train.run_name, config={
-            "variant": args.variant, "lambda_recon": args.lambda_recon,
-            "mask_ratio": args.mask_ratio, "lr": args.lr, "batch_size": args.batch_size,
-        })
+        wandb.init(
+            project="superclip-recon",
+            name=cfg.train.run_name,
+            config={
+                "train_mode": cfg.train.train_mode,
+                "variant": args.variant,
+                "lambda_clip": cfg.train.lambda_clip,
+                "lambda_token_cls": cfg.train.lambda_token_cls,
+                "lambda_recon": cfg.train.lambda_recon,
+                "mask_ratio": args.mask_ratio,
+                "lr": args.lr,
+                "batch_size": args.batch_size,
+            },
+        )
 
-    # --- Max masks for reconstruction ---
     max_masks = int(cfg.data.max_caption_length * cfg.model.mask_ratio) + 1
 
-    # --- Training loop ---
     os.makedirs(cfg.train.save_dir, exist_ok=True)
     history = []
     global_step = 0
     best_metric_epoch = None
     best_metric_val = -1.0
-    ckpt_size_mb = None  # set after first checkpoint is saved
+    best_retrieval = {}
+    ckpt_size_mb = None
 
     for epoch in range(cfg.train.epochs):
         model.train()
-        epoch_losses = {"l_token_cls": 0, "l_recon": 0, "l_total": 0}
+        epoch_losses = {"l_clip": 0.0, "l_token_cls": 0.0, "l_recon": 0.0, "l_total": 0.0}
         n_batches = 0
 
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{cfg.train.epochs}")
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{cfg.train.epochs}")
         for batch_idx, (images, token_ids, captions_raw, img_ids) in enumerate(pbar):
-
-            # --- Create masks on CPU BEFORE moving to GPU ---
             if args.variant == "B":
-                _, mask_targets, mask_positions = create_phrase_mask_from_captions(
-                    token_ids, captions_raw, model.tokenizer, max_masks
-                )
+                _, mask_targets, _ = create_phrase_mask_from_captions(token_ids, captions_raw, model.tokenizer, max_masks)
             else:
-                _, mask_targets, mask_positions = create_mask(
-                    token_ids, cfg.model.mask_ratio, max_masks
-                )
+                _, mask_targets, _ = create_mask(token_ids, cfg.model.mask_ratio, max_masks)
 
-            # --- Build token classification labels on CPU ---
-            token_cls_labels = build_token_labels(
-                token_ids, vocab_map, cfg.model.num_token_classes
-            )
+            token_cls_labels = build_token_labels(token_ids, vocab_map, cfg.model.num_token_classes)
 
-            # --- Move everything to GPU ---
             images = images.to(device)
             token_ids = token_ids.to(device)
             mask_targets = mask_targets.to(device)
             token_cls_labels = token_cls_labels.to(device)
 
-            # --- Forward (skip text encoding during training — not needed for loss) ---
-            outputs = model(images, token_ids, encode_text=False)
+            optimizer.zero_grad(set_to_none=True)
+            amp_ctx = autocast if amp_enabled else nullcontext
+            with amp_ctx(enabled=amp_enabled) if amp_enabled else amp_ctx():
+                outputs = model(images, token_ids, encode_text=True)
+                loss, losses_dict = total_loss(
+                    train_mode=cfg.train.train_mode,
+                    image_features=outputs["image_features"],
+                    text_features=outputs["text_features"],
+                    logit_scale=outputs["logit_scale"],
+                    token_cls_logits=outputs["token_cls_logits"],
+                    token_cls_labels=token_cls_labels,
+                    recon_logits=outputs["recon_logits"],
+                    mask_targets=mask_targets,
+                    lambda_clip=cfg.train.lambda_clip,
+                    lambda_token_cls=cfg.train.lambda_token_cls,
+                    lambda_recon=cfg.train.lambda_recon,
+                    token_cls_freq=outputs["token_cls_freq"],
+                    token_cls_num_updates=outputs["token_cls_num_updates"],
+                    token_cls_use_reweighting=cfg.model.token_cls_use_reweighting,
+                )
 
-            # --- Loss ---
-            loss, losses_dict = total_loss(
-                token_cls_logits=outputs["token_cls_logits"],
-                token_cls_labels=token_cls_labels,
-                recon_logits=outputs["recon_logits"],
-                mask_targets=mask_targets,
-                lambda_recon=cfg.train.lambda_recon,
-            )
+            if amp_enabled:
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(trainable_params, max_norm=cfg.train.grad_clip_norm)
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(trainable_params, max_norm=cfg.train.grad_clip_norm)
+                optimizer.step()
 
-            # --- Backward ---
-            optimizer.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(trainable_params, max_norm=1.0)
-            optimizer.step()
             scheduler.step()
             global_step += 1
 
-            # --- Logging ---
-            for k, v in losses_dict.items():
-                epoch_losses[k] += v
+            with torch.no_grad():
+                if hasattr(model.clip_model, "logit_scale"):
+                    model.clip_model.logit_scale.clamp_(0, math.log(100))
+
+            for key in epoch_losses:
+                epoch_losses[key] += losses_dict[key]
             n_batches += 1
 
             if batch_idx % cfg.train.log_every == 0:
                 current_lr = scheduler.get_last_lr()[0]
-                pbar.set_postfix({
-                    "tc": f"{losses_dict['l_token_cls']:.4f}",
-                    "rc": f"{losses_dict['l_recon']:.4f}",
-                    "tot": f"{losses_dict['l_total']:.4f}",
-                    "lr": f"{current_lr:.2e}",
-                })
-
+                pbar.set_postfix(
+                    {
+                        "clip": f"{losses_dict['l_clip']:.4f}",
+                        "tc": f"{losses_dict['l_token_cls']:.4f}",
+                        "rc": f"{losses_dict['l_recon']:.4f}",
+                        "tot": f"{losses_dict['l_total']:.4f}",
+                        "lr": f"{current_lr:.2e}",
+                    }
+                )
                 if cfg.train.use_wandb:
                     import wandb
-                    wandb.log({**losses_dict, "lr": current_lr},
-                              step=epoch * len(train_loader) + batch_idx)
+                    wandb.log({**losses_dict, "lr": current_lr}, step=global_step)
 
-        # --- Epoch summary ---
-        avg = {k: v / max(n_batches, 1) for k, v in epoch_losses.items()}
-        print(f"Epoch {epoch+1} avg losses: "
-              f"tc={avg['l_token_cls']:.4f}  rc={avg['l_recon']:.4f}  total={avg['l_total']:.4f}")
+        avg = {key: value / max(n_batches, 1) for key, value in epoch_losses.items()}
+        print(
+            f"Epoch {epoch + 1} avg losses: clip={avg['l_clip']:.4f}  "
+            f"tc={avg['l_token_cls']:.4f}  rc={avg['l_recon']:.4f}  total={avg['l_total']:.4f}"
+        )
 
-        # --- Save checkpoint ---
         ckpt_data = {
             "epoch": epoch + 1,
             "model_state_dict": model.state_dict(),
             "config": cfg,
             "avg_losses": avg,
+            "train_mode": cfg.train.train_mode,
+            "best_metric_epoch": best_metric_epoch,
+            "best_metric_val": best_metric_val,
         }
         if args.save_optimizer_state:
             ckpt_data["optimizer_state_dict"] = optimizer.state_dict()
             ckpt_data["scheduler_state_dict"] = scheduler.state_dict()
+            if amp_enabled:
+                ckpt_data["scaler_state_dict"] = scaler.state_dict()
 
-        ckpt_path = os.path.join(cfg.train.save_dir, f"epoch_{epoch+1}.pt")
+        ckpt_path = os.path.join(cfg.train.save_dir, f"epoch_{epoch + 1}.pt")
         torch.save(ckpt_data, ckpt_path)
         ckpt_size_mb = os.path.getsize(ckpt_path) / (1024 * 1024)
         print(f"Saved checkpoint: {ckpt_path} ({ckpt_size_mb:.1f} MB)")
 
-        # --- Evaluation ---
         epoch_record = {"epoch": epoch + 1, "losses": avg}
         if not args.skip_eval and (epoch + 1) % cfg.train.eval_every_epoch == 0:
             print(f"Running retrieval evaluation (max_images={args.eval_max_images})...")
             metrics = run_retrieval_eval(model, cfg, device, max_images=args.eval_max_images)
-            print(f"  I->T R@1={metrics['i2t_r1']:.2f}  "
-                  f"R@5={metrics['i2t_r5']:.2f}  R@10={metrics['i2t_r10']:.2f}")
-            print(f"  T->I R@1={metrics['t2i_r1']:.2f}  "
-                  f"R@5={metrics['t2i_r5']:.2f}  R@10={metrics['t2i_r10']:.2f}")
+            score = retrieval_score(metrics)
+            print(
+                f"  I->T R@1={metrics['i2t_r1']:.2f}  R@5={metrics['i2t_r5']:.2f}  R@10={metrics['i2t_r10']:.2f}"
+            )
+            print(
+                f"  T->I R@1={metrics['t2i_r1']:.2f}  R@5={metrics['t2i_r5']:.2f}  R@10={metrics['t2i_r10']:.2f}"
+            )
+            print(f"  Retrieval score (R-sum@1/5/10 both directions): {score:.2f}")
             epoch_record["retrieval"] = metrics
+            epoch_record["retrieval_score"] = score
 
-            # Track best for checkpoint retention
-            rsum = metrics["i2t_r1"] + metrics["t2i_r1"]
-            if rsum > best_metric_val:
-                best_metric_val = rsum
+            if score > best_metric_val:
+                best_metric_val = score
                 best_metric_epoch = epoch + 1
+                best_retrieval = metrics
 
             if cfg.train.use_wandb:
                 import wandb
-                wandb.log(metrics, step=(epoch + 1) * len(train_loader))
+                wandb.log({**metrics, "retrieval_score": score}, step=(epoch + 1) * len(train_loader))
 
         history.append(epoch_record)
 
-        # --- Checkpoint retention ---
         manage_checkpoints(
             save_dir=cfg.train.save_dir,
             save_strategy=args.save_strategy,
@@ -365,12 +380,14 @@ def train():
             best_metric_epoch=best_metric_epoch,
         )
 
-    # --- Save results file ---
     wall_time = time.time() - wall_start
     results = {
         "run_name": args.run_name,
+        "train_mode": cfg.train.train_mode,
         "variant": args.variant,
-        "lambda_recon": args.lambda_recon,
+        "lambda_clip": cfg.train.lambda_clip,
+        "lambda_token_cls": cfg.train.lambda_token_cls,
+        "lambda_recon": cfg.train.lambda_recon,
         "mask_ratio": args.mask_ratio,
         "lr": args.lr,
         "batch_size": args.batch_size,
@@ -380,22 +397,23 @@ def train():
         "trainable_params": n_trainable,
         "save_strategy": args.save_strategy,
         "checkpoint_size_mb": round(ckpt_size_mb, 1) if ckpt_size_mb is not None else None,
+        "best_epoch": best_metric_epoch,
+        "best_retrieval_score": round(best_metric_val, 3) if best_metric_epoch is not None else None,
+        "best_retrieval": best_retrieval,
         "history": history,
         "final_retrieval": history[-1].get("retrieval", {}),
     }
 
     if args.results_file:
         os.makedirs(os.path.dirname(args.results_file) or ".", exist_ok=True)
-        with open(args.results_file, "w") as f:
-            json.dump(results, f, indent=2)
-        print(f"Results saved to {args.results_file}")
+        out_path = args.results_file
     else:
-        fallback_path = os.path.join(cfg.train.save_dir, "results.json")
-        with open(fallback_path, "w") as f:
-            json.dump(results, f, indent=2)
-        print(f"Results saved to {fallback_path}")
+        out_path = os.path.join(cfg.train.save_dir, "results.json")
 
-    print(f"Training complete. Wall time: {wall_time/60:.1f} min")
+    with open(out_path, "w") as handle:
+        json.dump(results, handle, indent=2)
+    print(f"Results saved to {out_path}")
+    print(f"Training complete. Wall time: {wall_time / 60:.1f} min")
 
 
 if __name__ == "__main__":

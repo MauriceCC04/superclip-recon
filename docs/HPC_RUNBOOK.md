@@ -1,76 +1,187 @@
 # HPC Runbook — SuperCLIP-Recon (Bocconi)
 
-**Cluster:** Bocconi Jupiter I, `slogin.hpc.unibocconi.it`
-**User:** `<USER_ID>`, account `<USER_ID>`, partition `stud`, QoS `stud`
-**GPU:** one MIG-sliced A100, request as `gpu:4g.40gb:1` (40 GB slice)
-**Storage:** home-only, quota **50 GB**, check with `lquota`
+**Cluster:** Bocconi Jupiter I, `slogin.hpc.unibocconi.it`  
+**Account / user:** `<USER_ID>`  
+**Partition / QoS:** `stud` / `stud`  
+**GPU request:** `gpu:4g.40gb:1` (one 40 GB MIG slice of an A100 80GB)  
+**Home quota:** 50 GB total  
 **Repo root on cluster:** `/mnt/beegfsstudents/home/<USER_ID>/superclip-recon`
 
-This runbook is the **single source of truth** for running SuperCLIP-Recon on Bocconi HPC. It is written to be followed top-to-bottom by a collaborator or a future-you, with every `sbatch` command stated in full and every failure mode documented. Everything in it has been learned the hard way from real runs — see `INCIDENTS.md` in the same directory for the decision log behind these conventions.
+This document is the **single source of truth** for syncing, validating, and running SuperCLIP-Recon on Bocconi HPC.
+
+It is written to prevent the failures that have already happened in this project:
+
+- submitting too many jobs and hitting QoS limits
+- running repo-relative commands from `~` instead of the repo root
+- using `sbatch slurm/<script>.sh` directly and breaking `common.sh`
+- filling the 50 GB home quota and getting strange late-job failures
+- landing on `gnode04` and getting silent job termination
+- running `rsync` from the wrong machine
+
+For the decision history behind these rules, see `docs/INCIDENTS.md`.
+
+---
+
+## Core rules
+
+Before doing anything else, keep these rules in mind.
+
+1. **Run `rsync` from your Mac, not from inside the HPC shell.**
+2. **Always `cd` into the repo before running repo-relative commands.**
+3. **Submit SLURM jobs with wrapped `sbatch` from the repo root.**
+4. **Treat `--exclude=gnode04` as default for long jobs.**
+5. **Do not start the next gate until the previous one has finished and been checked.**
+6. **Monitor long jobs from `err/`, not `out/`.**
+7. **Keep storage below ~40 GB used before long sweeps or ablations.**
 
 ---
 
 ## Why the commands look the way they do
 
-You will notice three patterns that repeat in every submission in this runbook. All three are direct responses to specific failures, not stylistic choices. If you change them, you will reintroduce the failures.
+The repeated patterns in this runbook are deliberate.
 
-1. **All jobs are submitted as `sbatch --wrap='cd <REPO> && ... && bash slurm/<script>.sh'`** rather than `sbatch slurm/<script>.sh`. Bocconi copies the submitted script into `/var/spool/slurmd/jobNNNN/` and runs it from there, so `slurm/common.sh`'s `BASH_SOURCE[0]`-based path resolution fails with `/var/spool/.../common.sh: No such file or directory`. The wrap pattern runs the script from the repo, so `BASH_SOURCE[0]` resolves correctly.
-2. **Live progress is tailed from `err/`, not `out/`.** `tqdm` writes progress bars to stderr, and most Python warnings do too. Epoch progress shows up in `err/<JOBNAME>_<JOBID>.err`; `out/` is mostly empty until the job finishes.
-3. **Jobs are submitted one at a time, two at most.** The `stud` QoS enforces `QOSMaxSubmitJobPerUserLimit` (queue cap) and `QOSMaxJobsPerUserLimit` (running cap). Batch-submitting many ablations will reject everything past the 1st or 2nd; submitting two at a time is the safe maximum.
+### Wrapped `sbatch`
+
+Always submit jobs like:
+
+```bash
+sbatch --wrap='cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon && bash slurm/<script>.sh'
+```
+
+Do **not** submit jobs as:
+
+```bash
+sbatch slurm/<script>.sh
+```
+
+Bocconi copies submitted scripts into `/var/spool/slurmd/jobNNNN/` and runs the copy from there. If the script uses `BASH_SOURCE[0]` to find `slurm/common.sh`, direct submission can break with a path like:
+
+```text
+/var/spool/slurmd/jobNNNN/common.sh: No such file or directory
+```
+
+The wrapped form avoids that.
+
+### `err/` over `out/`
+
+Training progress bars (`tqdm`) and many warnings are written to **stderr**, not stdout. During long runs, `out/` can look empty while the job is actually training normally.
+
+### One job, maybe two
+
+The `stud` QoS enforces limits on both queued and running jobs. Mass-submitting ablations will hit `QOSMaxSubmitJobPerUserLimit` or sit in `PD (QOSMaxJobsPerUserLimit)`.
+
+That is why this runbook prefers:
+
+- one-off submissions
+- sequential sweep jobs
+- explicit gate progression
 
 ---
 
 ## 0. Access and first-time setup
 
-I have taken most of my set up information and information about the cluster from Bocconi's official HPC documentation and support. If you have not yet set up your access, please follow their instructions first: https://bocconi.sharepoint.com/sites/BocconiStudentsHPC/SitePages/Home.aspx
-
 ### 0.1. SSH from your Mac
 
-Off campus, connect to the Bocconi VPN first. Then:
+If you are off campus, connect to the Bocconi VPN first.
 
-If the alias is not set up, use the full form:
+Use either your alias or the full hostname:
 
 ```bash
 ssh <USER_ID>@slogin.hpc.unibocconi.it
+```
+
+Then enter the repo:
+
+```bash
 cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon
 ```
 
-Do **not** combine ssh and cd in one line like `ssh <USER_ID>@... cd ~/superclip-recon`. That resolves to the wrong home/path on Bocconi and is painful to debug.
+Do **not** combine SSH and `cd` into one command like:
+
+```bash
+ssh <USER_ID>@slogin.hpc.unibocconi.it cd ~/superclip-recon
+```
+
+If the alias or hostname fails to resolve:
+
+- check whether you are on the Bocconi VPN if required
+- try the full hostname from your **Mac terminal**
+- do not debug this from inside an already-open HPC shell
 
 ### 0.2. Sync code from your Mac
 
-Prefer `rsync` with explicit excludes over a blind copy:
+**Run the following command from your Mac, not after SSH-ing into the cluster.**
+
+Correct mental model:
+
+- local terminal on Mac -> `rsync` -> HPC repo directory
+
+Wrong mental model:
+
+- SSH into HPC first -> run the same `rsync` from the login node
+
+The sync command:
 
 ```bash
-rsync -av \
-  --exclude '.venv' --exclude 'venv' \
-  --exclude '__pycache__' --exclude '.pytest_cache' --exclude '.mypy_cache' \
-  --exclude '.DS_Store' --exclude '.git' \
-  --exclude 'data/coco' --exclude 'checkpoints' --exclude 'results' \
+rsync -av --delete \
+  --exclude '.venv' \
+  --exclude 'venv' \
+  --exclude '__pycache__' \
+  --exclude '.pytest_cache' \
+  --exclude '.mypy_cache' \
+  --exclude '.DS_Store' \
+  --exclude '.git' \
+  --exclude 'data/coco' \
+  --exclude 'checkpoints' \
+  --exclude 'results' \
+  --exclude 'out' \
+  --exclude 'err' \
+  --exclude 'logs' \
+  --exclude 'vocab.json' \
   ~/PycharmProjects/superclip-recon/ \
-  bocconi-hpc:/mnt/beegfsstudents/home/<USER_ID>/superclip-recon/
+  <USER_ID>@slogin.hpc.unibocconi.it:/mnt/beegfsstudents/home/<USER_ID>/superclip-recon/
 ```
 
-Never `rsync` `data/coco` or `checkpoints` — you have 50 GB total, COCO alone is 20+ GB (already on the cluster), and one run's checkpoints are ~1.4 GB.
+Why the exclusions matter:
 
-### 0.3. One-time conda environment setup
+- `data/coco` is already on the cluster and large
+- `checkpoints`, `results`, `out`, `err`, `logs` are cluster outputs
+- `vocab.json` is treated as an already-built cluster artifact unless you deliberately rebuild it
+- `--delete` keeps the HPC repo aligned to your local repo, but it also means you should verify critical files after sync
 
-On first login to the cluster, run the repo's setup script from the login node:
+### 0.2b. After sync: verify the repo is still runnable
+
+After a sync, SSH into the cluster and check the repo.
+
+```bash
+cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon
+
+pwd
+ls slurm | sort
+ls -l slurm/common.sh slurm/run_preflight.sh slurm/run_gpu_smoke.sh slurm/run_one_experiment.sh
+ls data/coco/annotations | head
+ls -lh vocab.json
+```
+
+This catches accidental deletion of required scripts before you waste a compute allocation.
+
+### 0.3. One-time environment setup
+
+On first login, set up the conda environment from the login node.
 
 ```bash
 cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon
 
 module load miniconda3
-# Accept conda ToS for the default channels — without this, env creation errors out
 conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
 conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
 
 bash slurm/setup_env_ready.sh
 ```
 
-This creates the `superclip` conda env (Python 3.12), installs `requirements.txt`, pre-caches OpenCLIP weights, downloads COCO, and builds `vocab.json`. It does **not** build `phrases.json` — Variant B extracts phrases inline per caption and no longer reads that file.
+This creates the `superclip` env, installs dependencies, pre-caches CLIP weights, downloads COCO if needed, and builds `vocab.json`.
 
-If you need to reactivate the env in an interactive session later:
+If you later log in again and just want to reactivate the env:
 
 ```bash
 module load miniconda3
@@ -78,43 +189,76 @@ eval "$(conda shell.bash hook)"
 conda activate superclip
 ```
 
-### 0.4. Sanity: verify data and artifacts are in place
+### 0.4. Always `cd` before repo-relative commands
+
+Many commands in this runbook assume you are already in the repo.
+
+Before running things like:
+
+```bash
+bash slurm/setup_env_ready.sh ...
+python train.py ...
+ls slurm
+test -f vocab.json
+```
+
+first do:
 
 ```bash
 cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon
-ls data/coco/train2017 | head -3
-ls data/coco/val2017 | head -3
-ls data/coco/annotations
-ls vocab.json
 ```
 
-`phrases.json` is optional — missing is not a blocker.
+If you stay in `~`, commands like `bash slurm/setup_env_ready.sh` will fail even if the file exists in the repo.
+
+### 0.5. Basic sanity check
+
+```bash
+cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon
+
+ls data/coco/train2017 | head -3
+ls data/coco/val2017 | head -3
+ls data/coco/annotations | head
+ls -lh vocab.json
+```
+
+`phrases.json` is optional and not required for normal training.
 
 ---
 
-## 1. Gates — run once, in order, before any real training
+## 1. Gates — run in order
 
-The repo is organized around progressively more expensive sanity checks. Each "gate" is cheap and rules out a class of failures. Skipping a gate is almost always a false economy.
+The project should be run in a strict gate sequence.
 
-### Gate 0 — Local synthetic tests (no cluster needed)
+Do **not** submit the next stage until the current one has finished and you have checked the outputs.
 
-Run on your Mac, before pushing to the cluster:
+### Gate 0 — Local tests
+
+Run on your Mac before syncing major code changes.
 
 ```bash
 python tests/run_tests.py
 ```
 
-**Verdicts:**
+Interpretation:
 
-| Verdict | Criterion | Action |
-|---|---|---|
-| PASS | All tests pass | Proceed to Gate 1 |
-| WARN | Only environment-dependent tests fail (no internet for CLIP weights, `datasets` missing locally) | Proceed to Gate 1 |
-| FAIL | Any core masking/retention/schema/pipeline test fails | Stop and fix locally — do not burn cluster time on a known-broken pipeline |
+- **PASS**: all good
+- **WARN**: only environment-dependent issues locally
+- **FAIL**: do not use cluster time yet
 
 ### Gate 1 — Cluster preflight
 
-Runs `tools/hpc_preflight.py` on a compute node: checks imports, GPU visibility, data presence, cache vars, storage, and does one tiny forward+backward+eval+checkpoint step.
+This verifies:
+
+- imports
+- GPU visibility
+- data presence
+- cache environment
+- storage situation
+- one tiny forward/backward step
+- one tiny retrieval evaluation
+- one tiny checkpoint write
+
+Submission:
 
 ```bash
 sbatch \
@@ -133,25 +277,26 @@ sbatch \
   --wrap='cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon && bash slurm/run_preflight.sh'
 ```
 
-Monitor:
+Check it with:
 
 ```bash
 squeue -u <USER_ID>
-tail -f out/superclip-preflight_<JOBID>.out      # preflight writes to stdout
+tail -50 out/superclip-preflight_<JOBID>.out
 cat results/preflight/preflight_report.json | python -m json.tool | head -80
+sacct -j <JOBID> -o JobID,JobName,State,Elapsed,ExitCode,NodeList
 ```
 
-**Verdicts:**
+You may proceed if:
 
-| Verdict | Criterion | Action |
-|---|---|---|
-| PASS | Overall PASS | Proceed to Gate 2 |
-| WARN | Only optional failures (missing `phrases.json`, home quota > 70%) | Proceed, note them |
-| FAIL | Import / GPU / runtime / storage failure | Stop and fix |
+- `preflight_report.json` exists
+- `overall_status` is `PASS` or acceptable `WARN`
+- `sacct` shows `COMPLETED`
+
+A `WARN` caused only by missing `phrases.json` is acceptable.
 
 ### Gate 2 — GPU smoke
 
-Runs a few real training steps and a small retrieval eval on the compute node. Writes peak memory, checkpoint size, and retrieval metrics to a JSON.
+Runs a few real steps and a small retrieval eval.
 
 ```bash
 sbatch \
@@ -170,11 +315,16 @@ sbatch \
   --wrap='cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon && bash slurm/run_gpu_smoke.sh'
 ```
 
-Look for: finite losses, checkpoint saved, retrieval JSON produced, `gpu_peak_mem_gb` well below 40. Historical peak has been ~3 GB — anything much larger means something is wrong.
+Look for:
+
+- finite losses
+- checkpoint written
+- retrieval JSON written
+- peak memory comfortably below 40 GB
 
 ### Gate 3 — Pilot baseline
 
-One real epoch of the baseline on conservative settings, then a projection of the full-run cost. This is the last chance to catch surprises cheaply.
+One short real baseline run used to catch surprises cheaply.
 
 ```bash
 sbatch \
@@ -193,30 +343,36 @@ sbatch \
   --wrap='cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon && bash slurm/run_pilot_baseline.sh'
 ```
 
-Long-running progress is in `err/`:
-
-```bash
-tail -f err/superclip-pilot_<JOBID>.err
-cat results/pilot/pilot_baseline.json | python -m json.tool | head -80
-```
-
-Confirm: `readiness == PASS`, projected 10-epoch runtime fits the 12 h budget, projected checkpoint storage is comfortable.
+Only proceed to full training if pilot outputs look healthy.
 
 ---
 
 ## 2. Main experiments
 
-**Three independent jobs**: baseline, Variant A, Variant B. Each is ~76 minutes at batch 128.
+Standard main experiments are:
+
+- baseline (`lambda_recon=0.0`)
+- Variant A
+- Variant B
+
+Use `--exclude=gnode04` for all long-running jobs unless HPC support confirms that node is healthy again.
 
 ### 2.1. Submission policy
 
-- Submit **one at a time**, at most two total in-flight.
-- If a submission is rejected with `QOSMaxSubmitJobPerUserLimit`, wait for a running job to finish, then submit again.
-- If a submission lands as `PD (QOSMaxJobsPerUserLimit)`, that is not an error — it will start as soon as the running job exits.
+Default policy:
 
-### 2.2. Main runs
+- submit **one** long job at a time
+- two in-flight jobs is the upper safe limit
+- queued `PD` states are normal
 
-#### Baseline (λ=0)
+If you see:
+
+- `QOSMaxSubmitJobPerUserLimit`
+- `QOSMaxJobsPerUserLimit`
+
+that is a scheduler policy issue, not a code bug.
+
+### 2.2. Baseline
 
 ```bash
 sbatch \
@@ -236,7 +392,7 @@ sbatch \
   --wrap='cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon && export RUN_NAME=baseline VARIANT=A LAMBDA_RECON=0.0 MASK_RATIO=0.15 SAVE_DIR=./checkpoints/baseline RESULTS_FILE=./results/baseline.json SAVE_STRATEGY=last_and_best KEEP_LAST_K=1 EVAL_MAX_IMAGES=5000 && bash slurm/run_one_experiment.sh'
 ```
 
-#### Variant A (λ=0.5, masked token reconstruction)
+### 2.3. Variant A
 
 ```bash
 sbatch \
@@ -256,7 +412,7 @@ sbatch \
   --wrap='cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon && export RUN_NAME=variant_a VARIANT=A LAMBDA_RECON=0.5 MASK_RATIO=0.15 SAVE_DIR=./checkpoints/variant_a RESULTS_FILE=./results/variant_a.json SAVE_STRATEGY=last_and_best KEEP_LAST_K=1 EVAL_MAX_IMAGES=5000 && bash slurm/run_one_experiment.sh'
 ```
 
-#### Variant B (λ=0.5, phrase reconstruction, per-caption inline)
+### 2.4. Variant B
 
 ```bash
 sbatch \
@@ -276,32 +432,13 @@ sbatch \
   --wrap='cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon && export RUN_NAME=variant_b VARIANT=B LAMBDA_RECON=0.5 MASK_RATIO=0.15 PHRASE_PATH=./phrases.json SAVE_DIR=./checkpoints/variant_b RESULTS_FILE=./results/variant_b.json SAVE_STRATEGY=last_and_best KEEP_LAST_K=1 EVAL_MAX_IMAGES=5000 && bash slurm/run_one_experiment.sh'
 ```
 
-> **Why `--exclude=gnode04`?** gnode04 has produced recurring exit-code `120:0` failures at eval-start for our jobs, with no Python traceback, while the same config succeeds on gnode02. See `INCIDENTS.md` §"Node failures on gnode04". Keep the exclusion until HPC support confirms the issue is resolved.
-
-### 2.3. Monitoring
-
-```bash
-squeue -u <USER_ID>
-tail -f err/superclip-baseline_<JOBID>.err
-```
-
-### 2.4. Inspecting results
-
-```bash
-cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon
-ls -lh results/baseline.json results/variant_a.json results/variant_b.json
-python -m json.tool results/baseline.json | head -40
-```
-
-**Note:** the successful main runs were all done at `batch_size=128`. If you rerun or compare against these, keep the batch size the same — cross-batch-size comparisons confound the metric.
-
 ---
 
-## 3. Matched seed reruns (Gate 4b)
+## 3. Matched-seed reruns
 
-When you want clean comparisons between baseline and a specific ablation under the **same seed and batch size**, do not rely on `run_one_experiment.sh` — it doesn't expose `--seed`. Submit `python train.py ... --seed <n>` directly through `--wrap`.
+For clean comparisons, prefer direct `python train.py` submissions when you need control over seed and naming.
 
-### Baseline, seed 43, batch 128
+Example baseline rerun at seed 43, batch 128:
 
 ```bash
 sbatch \
@@ -321,16 +458,25 @@ sbatch \
   --wrap='cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon && source slurm/common.sh && cd "$PROJECT_ROOT" && print_job_header && activate_env && ensure_data_file data/coco/train2017 && ensure_data_file data/coco/val2017 && ensure_data_file data/coco/annotations/captions_val2017.json && ensure_data_file vocab.json && python train.py --coco_root ./data/coco --vocab_path ./vocab.json --run_name baseline_s43_b128 --variant A --lambda_recon 0.0 --mask_ratio 0.15 --epochs 10 --batch_size 128 --lr 1e-5 --eval_max_images 5000 --save_strategy last_and_best --keep_last_k 1 --seed 43 --save_dir ./checkpoints/baseline_s43_b128 --results_file ./results/baseline_s43_b128.json'
 ```
 
-### Lambda sweep at fixed seed (generic template)
+---
 
-Replace `LAMBDA` with the value you want (e.g. `1.0`, `1.5`, `2.0`). Keep the `_s43_b128` suffix so the results slot into the same comparison table:
+## 3b. Sequential lambda sweep in one SLURM job
+
+When you want to evaluate several lambdas without manually resubmitting every ~75 minutes, prefer a **single sequential sweep job**.
+
+This is better than a job array on this cluster because job arrays still create many jobs and can still hit QoS limits.
+
+Recommended uses:
+
+- small fixed grids such as `{0.0, 0.1, 0.5, 1.0}`
+- matched seed and batch size
+- `--exclude=gnode04`
+
+Submission:
 
 ```bash
-LAMBDA=2.0
-LAMBDA_TAG=$(echo "$LAMBDA" | tr '.' 'p')   # e.g. 2.0 -> 2p0
-
 sbatch \
-  --job-name=superclip-lambda${LAMBDA_TAG}-s43-b128 \
+  --job-name=superclip-lambda-sweep \
   --account=<USER_ID> \
   --partition=stud \
   --qos=stud \
@@ -343,204 +489,151 @@ sbatch \
   --gres=gpu:4g.40gb:1 \
   --cpus-per-task=8 \
   --mem=32G \
-  --wrap="cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon && source slurm/common.sh && cd \"\$PROJECT_ROOT\" && print_job_header && activate_env && ensure_data_file data/coco/train2017 && ensure_data_file data/coco/val2017 && ensure_data_file data/coco/annotations/captions_val2017.json && ensure_data_file vocab.json && python train.py --coco_root ./data/coco --vocab_path ./vocab.json --run_name lambda_${LAMBDA}_s43_b128 --variant A --lambda_recon ${LAMBDA} --mask_ratio 0.15 --epochs 10 --batch_size 128 --lr 1e-5 --eval_max_images 5000 --save_strategy last_and_best --keep_last_k 1 --seed 43 --save_dir ./checkpoints/ablations/lambda_${LAMBDA}_s43_b128 --results_file ./results/ablations/lambda_${LAMBDA}_s43_b128.json"
+  --wrap='cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon && bash slurm/run_lambda_sweep.sh'
 ```
 
-This is the preferred pattern whenever you need clean, matched comparisons. It is what was used successfully for the project's λ sweep.
+Operational expectations:
+
+- the sweep should skip lambdas whose results already exist
+- one failing lambda should not kill the whole sweep if the script is written defensively
+- progress appears in `err/`
+- do not submit the sweep until preflight is confirmed healthy
 
 ---
 
-## 4. Ablations
+## 4. Storage management
 
-Only start after main runs are green and storage has been checked.
-
-### 4.1. Storage check
+Before long runs or ablations, check storage.
 
 ```bash
 lquota
-du -sh checkpoints results out err
-du -sh ~/.cache
+du -sh checkpoints results out err ~/.cache
 ```
 
-Target: **< 40 GB used** before starting ablations. A single run peaks around ~2 GB during checkpoint rotation; 40 GB gives headroom for two runs plus the existing main-experiment checkpoints.
+Target: **stay below ~40 GB used** before starting long sweeps or many runs.
 
-Common cleanup to get there:
+Why:
+
+- the home quota is 50 GB
+- quota exhaustion has already caused jobs to fail at write time or fail to start at all
+
+Common cleanup:
 
 ```bash
-# Drop intermediate pilot/smoke artifacts
+cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon
+
+rm -rf checkpoints results out err logs
+find . -type d \( -name '__pycache__' -o -name '.pytest_cache' -o -name '.mypy_cache' \) -prune -exec rm -rf {} +
+mkdir -p checkpoints results out err logs
+```
+
+Additional cleanup if needed:
+
+```bash
 rm -rf checkpoints/pilot checkpoints/smoke
 rm -f results/preflight/_tiny_ckpt.pt
-
-# Drop stale early-epoch checkpoints from completed runs
-# (last_and_best keeps `best` + `current`; older epochs are safe to delete)
-rm -f checkpoints/baseline/epoch_2.pt checkpoints/baseline_s43_b128/epoch_2.pt
-# ... adjust per actual contents
+find checkpoints -name 'epoch_2.pt' -delete
 ```
 
-### 4.2. Submit ablation grid
+Retention defaults:
 
-Recommended: use matched-seed wrapped submissions (§3) one at a time, not `slurm/submit_ablations.sh`, because submit_ablations reuses defaults that do not match the main runs and can mass-submit beyond the QoS limit.
-
-If you do want to use the batch submitter:
-
-```bash
-bash slurm/submit_ablations.sh
-squeue -u <USER_ID>
-```
-
-Expect `QOSMaxSubmitJobPerUserLimit` rejections on submissions past the first two. That is not a code bug — it is the cluster's policy — and the only fix is to wait and resubmit the remainder later.
-
-### 4.3. Analysis
-
-After runs complete, always activate the env first:
-
-```bash
-module load miniconda3
-eval "$(conda shell.bash hook)"
-conda activate superclip
-python analyze_results.py --results_dir ./results --output_dir ./results/figures
-ls -lh results/figures
-```
-
-If you see `matplotlib is required`, you are almost certainly outside the `superclip` conda env. Activate it and retry.
+- `--save_strategy last_and_best`
+- `--keep_last_k 1`
+- optimizer-state saving off unless explicitly needed
 
 ---
 
-## 5. Compositional evaluation (optional)
+## 5. Compositional evaluation
 
-Standard `slurm/run_compositional_eval.sh` only targets `checkpoints/baseline`, `checkpoints/variant_a`, `checkpoints/variant_b`. If your best checkpoint lives under `checkpoints/ablations/` (e.g. `lambda_1.0_s43_b128`), do **not** modify the stock script with a long inline `--wrap` — a real script file is safer. Example:
+Use the stock compositional eval for standard baseline/variant directories.
 
-```bash
-cat > slurm/run_comp_eval_matched.sh <<'SCRIPT_EOF'
-#!/usr/bin/env bash
-#SBATCH --job-name=superclip-comp-s43
-#SBATCH --account=<USER_ID>
-#SBATCH --partition=stud
-#SBATCH --qos=stud
-#SBATCH --exclude=gnode04
-#SBATCH --output=out/%x_%j.out
-#SBATCH --error=err/%x_%j.err
-#SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=<USER_ID>@studbocconi.it
-#SBATCH --time=08:00:00
-#SBATCH --gres=gpu:4g.40gb:1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=24G
+If you need to evaluate a matched rerun or ablation checkpoint under a different path, create a small dedicated script rather than trying to force a giant inline `--wrap` command.
 
-set -euo pipefail
-
-cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon
-source slurm/common.sh
-cd "$PROJECT_ROOT"
-
-print_job_header
-activate_env
-mkdir -p results
-
-for dir in checkpoints/baseline_s43_b128 checkpoints/ablations/lambda_1.0_s43_b128; do
-  NAME=$(basename "$dir")
-  LAST_CKPT=$(ls -t "$dir"/epoch_*.pt 2>/dev/null | head -1 || true)
-
-  if [ -n "$LAST_CKPT" ]; then
-    echo "Compositional eval: $NAME -> $LAST_CKPT"
-    python eval_compositional.py \
-      --checkpoint "$LAST_CKPT" \
-      --benchmark all \
-      --output "./results/compositional_${NAME}.json" \
-      ${HF_TOKEN:+--hf_token "$HF_TOKEN"}
-  else
-    echo "No checkpoint found for $NAME -- skipping"
-  fi
-done
-SCRIPT_EOF
-
-chmod +x slurm/run_comp_eval_matched.sh
-sbatch slurm/run_comp_eval_matched.sh
-```
-
-If `HF_TOKEN` is unset, Winoground will be skipped; ARO still runs. That's acceptable — Winoground requires HF auth by design.
+Keep `--exclude=gnode04` for this as well.
 
 ---
 
-## 6. Monitoring cheatsheet
+## 6. Monitoring
 
 ### Running jobs
 
 ```bash
 squeue -u <USER_ID>
-tail -f err/<JOBNAME>_<JOBID>.err        # live progress (tqdm writes here)
-tail -f out/<JOBNAME>_<JOBID>.out        # setup banner + final summary
+tail -f err/<JOBNAME>_<JOBID>.err
+tail -f out/<JOBNAME>_<JOBID>.out
 ```
 
-### Completed or failed jobs
+Use `err/` first.
+
+### Completed jobs
 
 ```bash
 sacct -j <JOBID> -o JobID,JobName,State,Elapsed,ExitCode,NodeList
 sacct -j <JOBID> -P -o JobID,State,ExitCode,Reason,DerivedExitCode,MaxRSS,MaxVMSize,ReqMem
 ```
 
-`sacct` is the right tool for post-mortem; `scontrol show job` only works while the job is still in SLURM's memory.
-
-### After a failure, read the error file ends-first
-
-Because `tqdm` fills err files with carriage-return progress updates, the useful bytes are often at the end. Get them reliably with:
+### Read the end of the error log when `tqdm` has overwritten it
 
 ```bash
 tail -c 2000 err/<JOBNAME>_<JOBID>.err | od -c | tail -40
-grep -iE "error|fatal|kill|terminat|signal|abort|segfault|oom|bus|traceback" \
-  err/<JOBNAME>_<JOBID>.err
+grep -iE "error|fatal|kill|terminat|signal|abort|segfault|oom|bus|traceback" err/<JOBNAME>_<JOBID>.err
 ```
 
 ---
 
 ## 7. Safety defaults
 
-These are the values that have been validated against real runs on this cluster. Deviating from them should be a deliberate choice, not a default.
+These defaults have been the most reliable for this project.
 
 | Setting | Recommended value | Why |
 |---|---:|---|
-| `--save_strategy` | `last_and_best` | Retains only current + best checkpoints, ~1.4 GB per run |
-| `--keep_last_k` | `1` | Minimizes checkpoint growth under the 50 GB quota |
-| `--save_optimizer_state` | off (default) | Optimizer state would double checkpoint size |
-| `--eval_max_images` | `5000` main, `1000` pilot, `128` smoke | Keeps sanity stages cheap |
-| `--batch_size` (main) | `128` | Matches the successful completed runs |
-| `--batch_size` (pilot) | `64` | Conservative, passed readiness checks |
-| GPU request | `gpu:4g.40gb:1` | The MIG slice is a hard constraint of `stud` QoS |
-| CPUs / RAM | `8` / `32G` | Used by all successful main runs |
-| Wall time | `12:00:00` main, `04:00:00` pilot | 10-epoch runs take ~76 min, fits comfortably |
-| `--exclude` | `gnode04` | Until HPC confirms the node is healthy — see §8 |
-| Submission style | wrapped `sbatch` from repo root | Avoids SLURM spool-path `common.sh` failure |
-| Live monitoring | `err/` first, then `out/` | `tqdm` and warnings go to stderr |
+| save strategy | `last_and_best` | keeps best + current without exploding storage |
+| keep last k | `1` | minimizes quota pressure |
+| optimizer state | off | avoids doubling checkpoint size |
+| main batch size | `128` | matches the stable main runs |
+| pilot batch size | `64` | conservative test setting |
+| eval max images | `5000` main, `1000` pilot, `128` smoke | keeps small gates cheap |
+| GPU | `gpu:4g.40gb:1` | required by the `stud` QoS |
+| CPUs / RAM | `8` / `32G` | stable for long runs |
+| wall time | `12:00:00` main, `04:00:00` pilot | enough for typical runs |
+| node exclusion | `--exclude=gnode04` | protects against known-bad node behavior |
+| submission style | wrapped `sbatch` | avoids spool-path failures |
+| monitoring | `err/` first | where progress actually appears |
 
 ---
 
-## 8. When something goes wrong
+## 8. Troubleshooting
 
-These are the failure modes this project has actually hit, in roughly decreasing order of frequency. The full narrative for each is in `INCIDENTS.md`.
+### `slurm/setup_env_ready.sh: No such file or directory`
 
-### `Disk quota exceeded`
+You are probably in `~`, not in the repo.
 
-Free space in `checkpoints/`, `results/`, `out/`, `err/`, and `~/.cache` before trying anything else. See §4.1 for the cleanup commands. Do not resubmit until `lquota` shows < 40 GB used.
+Fix:
 
-### `sbatch: error: QOSMaxSubmitJobPerUserLimit`
+```bash
+cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon
+bash slurm/setup_env_ready.sh --step data
+```
 
-Cluster policy, not a code bug. You hit the per-user submit-queue cap. Wait for a running job to finish, then resubmit. Plan on submitting one at a time going forward.
+### `QOSMaxSubmitJobPerUserLimit`
 
-### `PD (QOSMaxJobsPerUserLimit)` in `squeue`
+You submitted too many jobs.
 
-Not an error. Your job is queued and will start automatically when a running job exits. Leave it alone.
+Fix: wait for a running job to finish, then resubmit.
+
+### `PD (QOSMaxJobsPerUserLimit)` or `PD (Priority)` or `PD (Resources)`
+
+These are normal queue states, not code errors.
 
 ### `/var/spool/slurmd/jobNNNN/common.sh: No such file or directory`
 
-You submitted `sbatch slurm/<script>.sh` directly. Use the wrapped form:
+You submitted a script directly with `sbatch slurm/<script>.sh`.
 
-```bash
-sbatch --wrap='cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon && bash slurm/<script>.sh'
-```
+Use wrapped submission instead.
 
 ### `CondaToSNonInteractiveError`
 
-The cluster refuses to create envs until Terms of Service are accepted for the default channels. One-time fix:
+Accept the Anaconda terms once on the login node:
 
 ```bash
 module load miniconda3
@@ -548,9 +641,9 @@ conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/ma
 conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
 ```
 
-### `ModuleNotFoundError: No module named 'torch'` / `matplotlib is required ...`
+### `ModuleNotFoundError` / `matplotlib is required`
 
-You are outside the `superclip` conda env. Activate it:
+You are not inside the `superclip` environment.
 
 ```bash
 module load miniconda3
@@ -558,53 +651,127 @@ eval "$(conda shell.bash hook)"
 conda activate superclip
 ```
 
-### Job fails with exit `120:0` and no Python traceback in `err/`
+### Job fails with exit `120:0` and no traceback
 
-Check the node. If `NodeList` in `sacct` is `gnode04` — known-bad for this project. Resubmit with `--exclude=gnode04`. If it's a different node, check `sacct -P -o MaxRSS,ReqMem` for host-RAM OOM, and check `lquota` for disk-full.
+First check the node:
+
+```bash
+sacct -j <JOBID> -o JobID,JobName,State,Elapsed,ExitCode,NodeList
+```
+
+If the job ran on `gnode04`, cancel/resubmit with `--exclude=gnode04`.
+
+If it ran elsewhere, also inspect memory and quota.
 
 ### Job fails with exit `0:53` and `Elapsed=00:00:00`
 
-Usually a secondary failure — the job could not even start its prolog, often because the filesystem is quota-full or SLURM cancelled it due to a dependency/wrapper issue. Clean storage first, then resubmit.
+Usually a startup/prolog failure, often caused by quota or wrapper problems.
+
+Check storage first.
 
 ### No progress in `out/`
 
-Check `err/` instead — `tqdm` writes progress bars to stderr. `out/` is mostly empty during long runs and only fills in at the end.
+Look in `err/` instead.
 
-### Missing COCO / vocab
+### Missing COCO or vocab
 
-```bash
-bash slurm/setup_env_ready.sh --step data    # download COCO
-bash slurm/setup_env_ready.sh --step vocab   # build vocab.json
-```
-
-### CLIP weights cannot download on compute nodes
-
-Pre-cache them from the login node:
+From the repo root:
 
 ```bash
+bash slurm/setup_env_ready.sh --step data
+bash slurm/setup_env_ready.sh --step vocab
 bash slurm/setup_env_ready.sh --step cache
 ```
 
-### Retrieval eval crashes with a shape/alignment error
+### `phrases.json` missing in preflight
 
-Rare now, but the `evaluate.py` retrieval pipeline was previously broken by an indentation bug that nested the entire pipeline inside the caption-collection loop. If you see `n_captions_per_image` asserts fire or the pipeline loops forever on the first image, pull the latest `evaluate.py` — test 18 in `tests/run_tests.py` guards against regressions.
+This is acceptable. Variant B uses inline phrase extraction; `phrases.json` is optional.
 
 ---
 
-## 9. End-of-run checklist
+## 9. Recommended clean rerun workflow
 
-When all target runs are finished:
+When you want to restart from a clean state after code changes:
+
+### Step 1 — On HPC: clean outputs only
 
 ```bash
-# From your Mac — pull results back
-rsync -av bocconi-hpc:/mnt/beegfsstudents/home/<USER_ID>/superclip-recon/results/ \
-          ~/PycharmProjects/superclip-recon/results/
+ssh <USER_ID>@slogin.hpc.unibocconi.it
+cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon
 
-# Optional: pull checkpoints back (much larger; only if needed)
-rsync -av bocconi-hpc:/mnt/beegfsstudents/home/<USER_ID>/superclip-recon/checkpoints/ \
+rm -rf checkpoints results out err logs
+find . -type d \( -name '__pycache__' -o -name '.pytest_cache' -o -name '.mypy_cache' \) -prune -exec rm -rf {} +
+mkdir -p checkpoints results out err logs
+
+lquota
+du -sh checkpoints results out err ~/.cache
+```
+
+### Step 2 — On your Mac: resync code
+
+```bash
+rsync -av --delete \
+  --exclude '.venv' \
+  --exclude 'venv' \
+  --exclude '__pycache__' \
+  --exclude '.pytest_cache' \
+  --exclude '.mypy_cache' \
+  --exclude '.DS_Store' \
+  --exclude '.git' \
+  --exclude 'data/coco' \
+  --exclude 'checkpoints' \
+  --exclude 'results' \
+  --exclude 'out' \
+  --exclude 'err' \
+  --exclude 'logs' \
+  --exclude 'vocab.json' \
+  ~/PycharmProjects/superclip-recon/ \
+  <USER_ID>@slogin.hpc.unibocconi.it:/mnt/beegfsstudents/home/<USER_ID>/superclip-recon/
+```
+
+### Step 3 — On HPC: verify repo/data/artifacts
+
+```bash
+ssh <USER_ID>@slogin.hpc.unibocconi.it
+
+module load miniconda3
+eval "$(conda shell.bash hook)"
+conda activate superclip
+
+cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon
+
+pwd
+ls slurm | sort
+ls -l slurm/common.sh slurm/run_preflight.sh slurm/run_gpu_smoke.sh slurm/run_one_experiment.sh
+test -d data/coco/train2017 && echo "train2017 OK"
+test -d data/coco/val2017 && echo "val2017 OK"
+test -f data/coco/annotations/captions_train2017.json && echo "captions_train2017 OK"
+test -f data/coco/annotations/captions_val2017.json && echo "captions_val2017 OK"
+test -f vocab.json && echo "vocab.json OK"
+```
+
+### Step 4 — Run Gate 0 / Gate 1 / Gate 2
+
+Only then move on to baseline or sweep.
+
+---
+
+## 10. End-of-run checklist
+
+Pull results back to your Mac:
+
+```bash
+rsync -av <USER_ID>@slogin.hpc.unibocconi.it:/mnt/beegfsstudents/home/<USER_ID>/superclip-recon/results/ \
+          ~/PycharmProjects/superclip-recon/results/
+```
+
+Optionally pull checkpoints if needed:
+
+```bash
+rsync -av <USER_ID>@slogin.hpc.unibocconi.it:/mnt/beegfsstudents/home/<USER_ID>/superclip-recon/checkpoints/ \
           ~/PycharmProjects/superclip-recon/checkpoints/
 ```
 
-You can safely `exit` your SSH session while jobs are still running — SLURM jobs do not depend on the submitting shell.
+You may safely exit your SSH session while SLURM jobs are running.
 
-Finally, update `INCIDENTS.md` with any new failure modes you encountered. The next collaborator (or the next version of you, in a month) will thank you.
+Finally, add any new failure mode to `docs/INCIDENTS.md` so the next runbook revision captures it.
