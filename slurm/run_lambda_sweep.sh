@@ -1,13 +1,13 @@
 #!/bin/bash
 #SBATCH --job-name=superclip-lambda-sweep
-#SBATCH --account=<USER_ID>
+#SBATCH --account=3202029
 #SBATCH --partition=stud
 #SBATCH --qos=stud
 #SBATCH --exclude=gnode04
 #SBATCH --output=out/%x_%j.out
 #SBATCH --error=err/%x_%j.err
 #SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=<USER_ID>@studbocconi.it
+#SBATCH --mail-user=3202029@studbocconi.it
 #SBATCH --time=12:00:00
 #SBATCH --gres=gpu:4g.40gb:1
 #SBATCH --cpus-per-task=8
@@ -15,7 +15,7 @@
 
 set -uo pipefail
 
-cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon
+cd /mnt/beegfsstudents/home/3202029/superclip-recon
 source slurm/common.sh
 cd "$PROJECT_ROOT"
 
@@ -29,32 +29,47 @@ ensure_data_file vocab.json
 
 mkdir -p results/ablations checkpoints/ablations logs
 
-LAMBDAS=("0.0" "0.1" "0.5" "1.0")
+# Allow: bash slurm/run_lambda_sweep.sh A
+# or:    VARIANT=B sbatch slurm/run_lambda_sweep.sh
+VARIANT="${1:-${VARIANT:-A}}"
+if [[ "$VARIANT" != "A" && "$VARIANT" != "B" ]]; then
+  echo "Error: VARIANT must be A or B, got '$VARIANT'"
+  exit 1
+fi
+
+LAMBDAS=("0" "0.1" "0.5" "0.75" "1" "1.5" "2" "5")
+
 SEED="${SEED:-43}"
 BATCH_SIZE="${BATCH_SIZE:-128}"
 MASK_RATIO="${MASK_RATIO:-0.15}"
 LR="${LR:-1e-5}"
 EPOCHS="${EPOCHS:-10}"
-VARIANT="${VARIANT:-A}"
 EVAL_MAX_IMAGES="${EVAL_MAX_IMAGES:-5000}"
+TRAIN_MODE="${TRAIN_MODE:-auto}"
+LAMBDA_CLIP="${LAMBDA_CLIP:-1.0}"
+LAMBDA_TOKEN_CLS="${LAMBDA_TOKEN_CLS:-1.0}"
+SAVE_STRATEGY="${SAVE_STRATEGY:-last_and_best}"
+KEEP_LAST_K="${KEEP_LAST_K:-1}"
+PHRASE_PATH="${PHRASE_PATH:-./phrases.json}"
 
-SUMMARY="results/ablations/lambda_sweep_summary_s${SEED}_b${BATCH_SIZE}.jsonl"
+SUMMARY="results/ablations/lambda_sweep_variant_${VARIANT}_summary_s${SEED}_b${BATCH_SIZE}.jsonl"
 touch "$SUMMARY"
 
 for LAMBDA in "${LAMBDAS[@]}"; do
   TAG=$(echo "$LAMBDA" | tr '.' 'p')
-  RUN_NAME="lambda_${LAMBDA}_s${SEED}_b${BATCH_SIZE}"
+  RUN_NAME="lambda_${TAG}_var${VARIANT}_s${SEED}_b${BATCH_SIZE}"
   SAVE_DIR="./checkpoints/ablations/${RUN_NAME}"
   RESULTS_FILE="./results/ablations/${RUN_NAME}.json"
   LOG_FILE="./logs/${RUN_NAME}.log"
 
   echo "=================================================="
   echo "Starting ${RUN_NAME}"
+  echo "  variant=$VARIANT lambda=$LAMBDA"
   echo "=================================================="
 
   if [ -f "$RESULTS_FILE" ]; then
     echo "Skipping ${RUN_NAME} (results already exist)"
-    echo "{\"run_name\":\"${RUN_NAME}\",\"lambda\":${LAMBDA},\"status\":\"skipped_existing\"}" >> "$SUMMARY"
+    echo "{\"run_name\":\"${RUN_NAME}\",\"variant\":\"${VARIANT}\",\"lambda\":${LAMBDA},\"status\":\"skipped_existing\"}" >> "$SUMMARY"
     continue
   fi
 
@@ -62,32 +77,34 @@ for LAMBDA in "${LAMBDAS[@]}"; do
 
   START_TS=$(date +%s)
 
-  python train.py \
-    --coco_root ./data/coco \
-    --vocab_path ./vocab.json \
-    --run_name "$RUN_NAME" \
-    --variant "$VARIANT" \
-    --lambda_recon "$LAMBDA" \
-    --mask_ratio "$MASK_RATIO" \
-    --epochs "$EPOCHS" \
-    --batch_size "$BATCH_SIZE" \
-    --lr "$LR" \
-    --eval_max_images "$EVAL_MAX_IMAGES" \
-    --save_strategy last_and_best \
-    --keep_last_k 1 \
-    --seed "$SEED" \
-    --save_dir "$SAVE_DIR" \
-    --results_file "$RESULTS_FILE" \
-    > "$LOG_FILE" 2>&1
+  export RUN_NAME
+  export VARIANT
+  export LAMBDA_RECON="$LAMBDA"
+  export MASK_RATIO
+  export EPOCHS
+  export BATCH_SIZE
+  export LR
+  export EVAL_MAX_IMAGES
+  export TRAIN_MODE
+  export LAMBDA_CLIP
+  export LAMBDA_TOKEN_CLS
+  export SAVE_STRATEGY
+  export KEEP_LAST_K
+  export PHRASE_PATH
+  export SAVE_DIR
+  export RESULTS_FILE
+  export SEED
 
+  bash slurm/run_one_experiment.sh > "$LOG_FILE" 2>&1
   STATUS=$?
+
   END_TS=$(date +%s)
   ELAPSED=$((END_TS - START_TS))
 
   if [ "$STATUS" -eq 0 ] && [ -f "$RESULTS_FILE" ]; then
-    echo "{\"run_name\":\"${RUN_NAME}\",\"lambda\":${LAMBDA},\"status\":\"ok\",\"elapsed_sec\":${ELAPSED}}" >> "$SUMMARY"
+    echo "{\"run_name\":\"${RUN_NAME}\",\"variant\":\"${VARIANT}\",\"lambda\":${LAMBDA},\"status\":\"ok\",\"elapsed_sec\":${ELAPSED}}" >> "$SUMMARY"
   else
-    echo "{\"run_name\":\"${RUN_NAME}\",\"lambda\":${LAMBDA},\"status\":\"failed\",\"exit_code\":${STATUS},\"elapsed_sec\":${ELAPSED}}" >> "$SUMMARY"
+    echo "{\"run_name\":\"${RUN_NAME}\",\"variant\":\"${VARIANT}\",\"lambda\":${LAMBDA},\"status\":\"failed\",\"exit_code\":${STATUS},\"elapsed_sec\":${ELAPSED}}" >> "$SUMMARY"
     echo "Run ${RUN_NAME} failed; continuing to next lambda"
   fi
 done

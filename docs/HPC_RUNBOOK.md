@@ -149,7 +149,7 @@ Why the exclusions matter:
 - `vocab.json` is treated as an already-built cluster artifact unless you deliberately rebuild it
 - `--delete` keeps the HPC repo aligned to your local repo, but it also means you should verify critical files after sync
 
-### 0.2b. After sync: verify the repo is still runnable
+## 0.2b. After sync: verify the repo is still runnable
 
 After a sync, SSH into the cluster and check the repo.
 
@@ -158,13 +158,12 @@ cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon
 
 pwd
 ls slurm | sort
-ls -l slurm/common.sh slurm/run_preflight.sh slurm/run_gpu_smoke.sh slurm/run_one_experiment.sh
+ls -l slurm/common.sh slurm/run_preflight.sh slurm/run_gpu_smoke.sh slurm/run_one_experiment.sh slurm/run_lambda_sweep.sh
 ls data/coco/annotations | head
 ls -lh vocab.json
 ```
 
 This catches accidental deletion of required scripts before you waste a compute allocation.
-
 ### 0.3. One-time environment setup
 
 On first login, set up the conda environment from the login node.
@@ -459,24 +458,37 @@ sbatch \
 ```
 
 ---
-
 ## 3b. Sequential lambda sweep in one SLURM job
 
 When you want to evaluate several lambdas without manually resubmitting every ~75 minutes, prefer a **single sequential sweep job**.
 
 This is better than a job array on this cluster because job arrays still create many jobs and can still hit QoS limits.
 
+The sweep script is now **variant-parameterized**, so the same script can run either:
+
+* **Variant A** lambda sweep
+* **Variant B** lambda sweep
+
+The launcher delegates each run to `slurm/run_one_experiment.sh`, so Variant B automatically uses the same shared experiment path as normal one-off submissions.
+
 Recommended uses:
 
-- small fixed grids such as `{0.0, 0.1, 0.5, 1.0}`
-- matched seed and batch size
-- `--exclude=gnode04`
+* matched seed and batch size
+* `--exclude=gnode04`
+* one variant sweep at a time
+* preflight already confirmed healthy
 
-Submission:
+Default lambda grid:
+
+```text
+{0, 0.1, 0.5, 0.75, 1, 1.5, 2, 5}
+```
+
+### Variant A sweep
 
 ```bash
 sbatch \
-  --job-name=superclip-lambda-sweep \
+  --job-name=superclip-lambda-sweep-a \
   --account=<USER_ID> \
   --partition=stud \
   --qos=stud \
@@ -489,15 +501,80 @@ sbatch \
   --gres=gpu:4g.40gb:1 \
   --cpus-per-task=8 \
   --mem=32G \
-  --wrap='cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon && bash slurm/run_lambda_sweep.sh'
+  --wrap='cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon && export VARIANT=A && bash slurm/run_lambda_sweep.sh'
+```
+
+### Variant B sweep
+
+```bash
+sbatch \
+  --job-name=superclip-lambda-sweep-b \
+  --account=<USER_ID> \
+  --partition=stud \
+  --qos=stud \
+  --exclude=gnode04 \
+  --output=out/%x_%j.out \
+  --error=err/%x_%j.err \
+  --mail-type=END,FAIL \
+  --mail-user=<USER_ID>@studbocconi.it \
+  --time=12:00:00 \
+  --gres=gpu:4g.40gb:1 \
+  --cpus-per-task=8 \
+  --mem=32G \
+  --wrap='cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon && export VARIANT=B && bash slurm/run_lambda_sweep.sh'
+```
+
+### Optional overrides
+
+You can also override the seed and batch size at submission time.
+
+Example:
+
+```bash
+sbatch \
+  --job-name=superclip-lambda-sweep-a-s43 \
+  --account=<USER_ID> \
+  --partition=stud \
+  --qos=stud \
+  --exclude=gnode04 \
+  --output=out/%x_%j.out \
+  --error=err/%x_%j.err \
+  --mail-type=END,FAIL \
+  --mail-user=<USER_ID>@studbocconi.it \
+  --time=12:00:00 \
+  --gres=gpu:4g.40gb:1 \
+  --cpus-per-task=8 \
+  --mem=32G \
+  --wrap='cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon && export VARIANT=A SEED=43 BATCH_SIZE=128 && bash slurm/run_lambda_sweep.sh'
 ```
 
 Operational expectations:
 
-- the sweep should skip lambdas whose results already exist
-- one failing lambda should not kill the whole sweep if the script is written defensively
-- progress appears in `err/`
-- do not submit the sweep until preflight is confirmed healthy
+* the sweep should skip lambdas whose results already exist
+* one failing lambda should not kill the whole sweep if the script is written defensively
+* progress appears in `err/`
+* do not submit the sweep until preflight is confirmed healthy
+* **run names and summary files should include the variant** so A and B sweeps do not overwrite each other
+
+Expected output pattern:
+
+* per-run results:
+
+  * `results/ablations/lambda_<tag>_varA_s<seed>_b<batch>.json`
+  * `results/ablations/lambda_<tag>_varB_s<seed>_b<batch>.json`
+* sweep summary:
+
+  * `results/ablations/lambda_sweep_variant_A_summary_s<seed>_b<batch>.jsonl`
+  * `results/ablations/lambda_sweep_variant_B_summary_s<seed>_b<batch>.jsonl`
+
+### Important interpretation rule
+
+For this project, keep the baseline story clean:
+
+* **baseline anchor** = Variant A with `lambda_recon=0`
+* **extension sweep** = nonzero lambda values
+* **Variant B sweep** = phrase-reconstruction extension, not the baseline reproduction
+
 
 ---
 
@@ -579,28 +656,32 @@ tail -c 2000 err/<JOBNAME>_<JOBID>.err | od -c | tail -40
 grep -iE "error|fatal|kill|terminat|signal|abort|segfault|oom|bus|traceback" err/<JOBNAME>_<JOBID>.err
 ```
 
+
 ---
 
 ## 7. Safety defaults
 
 These defaults have been the most reliable for this project.
 
-| Setting | Recommended value | Why |
-|---|---:|---|
-| save strategy | `last_and_best` | keeps best + current without exploding storage |
-| keep last k | `1` | minimizes quota pressure |
-| optimizer state | off | avoids doubling checkpoint size |
-| main batch size | `128` | matches the stable main runs |
-| pilot batch size | `64` | conservative test setting |
-| eval max images | `5000` main, `1000` pilot, `128` smoke | keeps small gates cheap |
-| GPU | `gpu:4g.40gb:1` | required by the `stud` QoS |
-| CPUs / RAM | `8` / `32G` | stable for long runs |
-| wall time | `12:00:00` main, `04:00:00` pilot | enough for typical runs |
-| node exclusion | `--exclude=gnode04` | protects against known-bad node behavior |
-| submission style | wrapped `sbatch` | avoids spool-path failures |
-| monitoring | `err/` first | where progress actually appears |
+| Setting                   |                      Recommended value | Why                                                                    |
+| ------------------------- | -------------------------------------: | ---------------------------------------------------------------------- |
+| save strategy             |                        `last_and_best` | keeps best + current without exploding storage                         |
+| keep last k               |                                    `1` | minimizes quota pressure                                               |
+| optimizer state           |                                    off | avoids doubling checkpoint size                                        |
+| main batch size           |                                  `128` | matches the stable main runs                                           |
+| pilot batch size          |                                   `64` | conservative test setting                                              |
+| eval max images           | `5000` main, `1000` pilot, `128` smoke | keeps small gates cheap                                                |
+| default lambda sweep grid |      `0, 0.1, 0.5, 0.75, 1, 1.5, 2, 5` | covers baseline, in-scope settings, and a few higher-lambda extensions |
+| sweep variant selection   |             `VARIANT=A` or `VARIANT=B` | same script can run either reconstruction variant                      |
+| GPU                       |                        `gpu:4g.40gb:1` | required by the `stud` QoS                                             |
+| CPUs / RAM                |                            `8` / `32G` | stable for long runs                                                   |
+| wall time                 |      `12:00:00` main, `04:00:00` pilot | enough for typical runs                                                |
+| node exclusion            |                    `--exclude=gnode04` | protects against known-bad node behavior                               |
+| submission style          |                       wrapped `sbatch` | avoids spool-path failures                                             |
+| monitoring                |                           `err/` first | where progress actually appears                                        |
 
 ---
+
 
 ## 8. Troubleshooting
 
@@ -650,6 +731,18 @@ module load miniconda3
 eval "$(conda shell.bash hook)"
 conda activate superclip
 ```
+
+### Sweep produced Variant A-style filenames during a Variant B run
+
+Your sweep naming is probably missing the variant tag.
+
+Fix: make sure the sweep writes run names and summary files that include `varA` / `varB` or `variant_A` / `variant_B`.
+
+### Variant B sweep fails because `phrases.json` is missing
+
+This should not block normal use.
+
+Variant B runs through the same shared launcher as standard experiments. If `phrases.json` exists, it may be passed through; if it does not, the run should still be allowed to proceed under the current project setup.
 
 ### Job fails with exit `120:0` and no traceback
 
@@ -742,7 +835,7 @@ cd /mnt/beegfsstudents/home/<USER_ID>/superclip-recon
 
 pwd
 ls slurm | sort
-ls -l slurm/common.sh slurm/run_preflight.sh slurm/run_gpu_smoke.sh slurm/run_one_experiment.sh
+ls -l slurm/common.sh slurm/run_preflight.sh slurm/run_gpu_smoke.sh slurm/run_one_experiment.sh slurm/run_lambda_sweep.sh
 test -d data/coco/train2017 && echo "train2017 OK"
 test -d data/coco/val2017 && echo "val2017 OK"
 test -f data/coco/annotations/captions_train2017.json && echo "captions_train2017 OK"
@@ -753,25 +846,3 @@ test -f vocab.json && echo "vocab.json OK"
 ### Step 4 — Run Gate 0 / Gate 1 / Gate 2
 
 Only then move on to baseline or sweep.
-
----
-
-## 10. End-of-run checklist
-
-Pull results back to your Mac:
-
-```bash
-rsync -av <USER_ID>@slogin.hpc.unibocconi.it:/mnt/beegfsstudents/home/<USER_ID>/superclip-recon/results/ \
-          ~/PycharmProjects/superclip-recon/results/
-```
-
-Optionally pull checkpoints if needed:
-
-```bash
-rsync -av <USER_ID>@slogin.hpc.unibocconi.it:/mnt/beegfsstudents/home/<USER_ID>/superclip-recon/checkpoints/ \
-          ~/PycharmProjects/superclip-recon/checkpoints/
-```
-
-You may safely exit your SSH session while SLURM jobs are running.
-
-Finally, add any new failure mode to `docs/INCIDENTS.md` so the next runbook revision captures it.
