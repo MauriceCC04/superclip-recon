@@ -99,16 +99,27 @@ def main():
     labels = labels.to(device)
     mask_targets = mask_targets.to(device)
     loss, loss_dict = total_loss(
-        outputs["token_cls_logits"], labels,
-        outputs["recon_logits"], mask_targets,
+        train_mode=cfg.train.train_mode,
+        image_features=outputs["image_features"],
+        text_features=outputs["text_features"],
+        logit_scale=outputs["logit_scale"],
+        token_cls_logits=outputs["token_cls_logits"],
+        token_cls_labels=labels,
+        recon_logits=outputs["recon_logits"],
+        mask_targets=mask_targets,
+        lambda_clip=cfg.train.lambda_clip,
+        lambda_token_cls=cfg.train.lambda_token_cls,
         lambda_recon=cfg.train.lambda_recon,
+        token_cls_freq=outputs["token_cls_freq"],
+        token_cls_num_updates=outputs["token_cls_num_updates"],
+        token_cls_use_reweighting=cfg.model.token_cls_use_reweighting,
     )
+    print(f"  l_clip:      {loss_dict['l_clip']:.4f}")
     print(f"  l_token_cls: {loss_dict['l_token_cls']:.4f}")
     print(f"  l_recon:     {loss_dict['l_recon']:.4f}")
     print(f"  l_total:     {loss_dict['l_total']:.4f}")
     loss.backward()
     print("  ✓ Backward pass works")
-
     # --- 7. Quick shape check (NOT a real retrieval evaluation) ---
     print("\n[7/7] Quick similarity matrix shape check...")
     print("  NOTE: This only verifies encode_image/encode_text produce")
