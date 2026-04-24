@@ -42,6 +42,9 @@ KEEP_LAST_K="${KEEP_LAST_K:-1}"
 PHRASE_PATH="${PHRASE_PATH:-./phrases.json}"
 SAVE_DIR="${SAVE_DIR:-./checkpoints/$RUN_NAME}"
 RESULTS_FILE="${RESULTS_FILE:-./results/$RUN_NAME.json}"
+SEED="${SEED:-42}"
+NUM_WORKERS="${NUM_WORKERS:-4}"
+DETERMINISTIC="${DETERMINISTIC:-0}"
 
 mkdir -p "$(dirname "$RESULTS_FILE")"
 mkdir -p "$SAVE_DIR"
@@ -55,6 +58,7 @@ echo "  LAMBDA_TOKEN_CLS=$LAMBDA_TOKEN_CLS"
 echo "  LAMBDA_RECON=$LAMBDA_RECON"
 echo "  MASK_RATIO=$MASK_RATIO"
 echo "  EPOCHS=$EPOCHS  BATCH=$BATCH_SIZE  LR=$LR"
+echo "  SEED=$SEED  NUM_WORKERS=$NUM_WORKERS  DETERMINISTIC=$DETERMINISTIC"
 echo "  SAVE=$SAVE_STRATEGY keep=$KEEP_LAST_K"
 
 EXTRA_ARGS=()
@@ -72,6 +76,9 @@ if [ "${FREEZE_LOGIT_SCALE:-0}" = "1" ]; then
 fi
 if [ "${NO_AMP:-0}" = "1" ]; then
     EXTRA_ARGS+=(--no_amp)
+fi
+if [ "$DETERMINISTIC" = "1" ]; then
+    EXTRA_ARGS+=(--deterministic)
 fi
 
 python train.py \
@@ -92,6 +99,8 @@ python train.py \
     --keep_last_k "$KEEP_LAST_K" \
     --save_dir "$SAVE_DIR" \
     --results_file "$RESULTS_FILE" \
+    --seed "$SEED" \
+    --num_workers "$NUM_WORKERS" \
     "${EXTRA_ARGS[@]}"
 
 echo "=== $RUN_NAME complete: $(date) ==="

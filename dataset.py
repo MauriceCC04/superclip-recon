@@ -10,25 +10,33 @@ Each sample yields:
 import os
 import json
 import random
+import hashlib
 from PIL import Image
 from torch.utils.data import Dataset
 
 
 class COCOCaptionsDataset(Dataset):
     """
-    Loads COCO images + captions. For each image, randomly picks ONE caption
-    per epoch (standard practice for contrastive training).
+    Loads COCO images + captions. For each image, picks ONE caption.
 
-    Reproducibility caveat:
-        Caption selection uses the global `random` module seeded once in
-        train.py via set_seed(). Because __getitem__ is called concurrently
-        by DataLoader workers, exact caption assignment per (epoch, image)
-        is NOT reproducible across num_workers > 0 even with the same seed.
-        Retrieval/eval metrics are robust to this (std of final R@1 across
-        reseeds is much smaller than between-variant differences), but if
-        you need bit-exact reproducibility, set num_workers=0.
+    Modes:
+        - stochastic mode (default): caption is sampled with random.choice(...)
+        - deterministic mode: caption is chosen deterministically from
+          (base_seed, epoch, image_id), which is reproducible across runs
+
+    Deterministic mode is recommended for matched baseline vs improvement runs.
     """
-    def __init__(self, root, ann_file, image_dir, transform=None, tokenizer=None):
+
+    def __init__(
+        self,
+        root,
+        ann_file,
+        image_dir,
+        transform=None,
+        tokenizer=None,
+        base_seed: int = 42,
+        deterministic_caption: bool = False,
+    ):
         self.image_root = os.path.join(root, image_dir)
         ann_path = os.path.join(root, ann_file)
 
@@ -52,11 +60,34 @@ class COCOCaptionsDataset(Dataset):
 
         self.transform = transform
         self.tokenizer = tokenizer
+        self.base_seed = int(base_seed)
+        self.deterministic_caption = bool(deterministic_caption)
+        self.epoch = 0
 
-        print(f"[Dataset] Loaded {len(self.image_ids)} images from {ann_path}")
+        mode = "deterministic" if self.deterministic_caption else "stochastic"
+        print(f"[Dataset] Loaded {len(self.image_ids)} images from {ann_path} ({mode} caption selection)")
 
     def __len__(self):
         return len(self.image_ids)
+
+    def set_epoch(self, epoch: int):
+        self.epoch = int(epoch)
+
+    def _deterministic_index(self, img_id: int, n_captions: int) -> int:
+        key = f"{self.base_seed}:{self.epoch}:{int(img_id)}".encode("utf-8")
+        digest = hashlib.sha1(key).hexdigest()
+        value = int(digest[:16], 16)
+        return value % n_captions
+
+    def _choose_caption(self, captions, img_id: int):
+        if not captions:
+            return ""
+
+        if self.deterministic_caption:
+            idx = self._deterministic_index(img_id, len(captions))
+            return captions[idx]
+
+        return random.choice(captions)
 
     def __getitem__(self, idx):
         img_id = self.image_ids[idx]
@@ -68,7 +99,7 @@ class COCOCaptionsDataset(Dataset):
             image = self.transform(image)
 
         captions = self.img_id_to_captions[img_id]
-        caption_raw = random.choice(captions)
+        caption_raw = self._choose_caption(captions, img_id)
 
         token_ids = self.tokenizer(caption_raw).squeeze(0)
 

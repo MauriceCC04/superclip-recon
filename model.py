@@ -55,7 +55,7 @@ class ReconstructionHead(nn.Module):
 
 
 class SuperCLIPRecon(nn.Module):
-    """CLIP backbone + SuperCLIP token head + reconstruction head."""
+    """CLIP backbone + SuperCLIP token head + optional reconstruction compute."""
 
     def __init__(self, cfg):
         super().__init__()
@@ -109,11 +109,18 @@ class SuperCLIPRecon(nn.Module):
     def get_logit_scale(self) -> torch.Tensor:
         return self.clip_model.logit_scale.exp()
 
-    def forward(self, images: torch.Tensor, token_ids: torch.Tensor, encode_text: bool = True):
+    def forward(
+        self,
+        images: torch.Tensor,
+        token_ids: torch.Tensor,
+        encode_text: bool = True,
+        compute_recon: bool = True,
+    ):
         image_features = self.encode_image(images)
         text_features = self.encode_text(token_ids) if encode_text else None
         token_cls_logits = self.token_cls_head(image_features)
-        recon_logits = self.recon_head(image_features)
+        recon_logits = self.recon_head(image_features) if compute_recon else None
+
         return {
             "image_features": image_features,
             "text_features": text_features,

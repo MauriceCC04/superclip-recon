@@ -51,9 +51,21 @@ LAMBDA_TOKEN_CLS="${LAMBDA_TOKEN_CLS:-1.0}"
 SAVE_STRATEGY="${SAVE_STRATEGY:-last_and_best}"
 KEEP_LAST_K="${KEEP_LAST_K:-1}"
 PHRASE_PATH="${PHRASE_PATH:-./phrases.json}"
+NUM_WORKERS="${NUM_WORKERS:-4}"
+DETERMINISTIC="${DETERMINISTIC:-0}"
 
 SUMMARY="results/ablations/lambda_sweep_variant_${VARIANT}_summary_s${SEED}_b${BATCH_SIZE}.jsonl"
 touch "$SUMMARY"
+
+echo "Lambda sweep config:"
+echo "  VARIANT=$VARIANT"
+echo "  SEED=$SEED"
+echo "  BATCH_SIZE=$BATCH_SIZE"
+echo "  NUM_WORKERS=$NUM_WORKERS"
+echo "  DETERMINISTIC=$DETERMINISTIC"
+echo "  MASK_RATIO=$MASK_RATIO"
+echo "  LAMBDAS=${LAMBDAS[*]}"
+echo "  SUMMARY=$SUMMARY"
 
 for LAMBDA in "${LAMBDAS[@]}"; do
   TAG=$(echo "$LAMBDA" | tr '.' 'p')
@@ -69,7 +81,7 @@ for LAMBDA in "${LAMBDAS[@]}"; do
 
   if [ -f "$RESULTS_FILE" ]; then
     echo "Skipping ${RUN_NAME} (results already exist)"
-    echo "{\"run_name\":\"${RUN_NAME}\",\"variant\":\"${VARIANT}\",\"lambda\":${LAMBDA},\"status\":\"skipped_existing\"}" >> "$SUMMARY"
+    echo "{\"run_name\":\"${RUN_NAME}\",\"variant\":\"${VARIANT}\",\"lambda\":${LAMBDA},\"seed\":${SEED},\"num_workers\":${NUM_WORKERS},\"deterministic\":${DETERMINISTIC},\"status\":\"skipped_existing\"}" >> "$SUMMARY"
     continue
   fi
 
@@ -94,6 +106,8 @@ for LAMBDA in "${LAMBDAS[@]}"; do
   export SAVE_DIR
   export RESULTS_FILE
   export SEED
+  export NUM_WORKERS
+  export DETERMINISTIC
 
   bash slurm/run_one_experiment.sh > "$LOG_FILE" 2>&1
   STATUS=$?
@@ -102,9 +116,9 @@ for LAMBDA in "${LAMBDAS[@]}"; do
   ELAPSED=$((END_TS - START_TS))
 
   if [ "$STATUS" -eq 0 ] && [ -f "$RESULTS_FILE" ]; then
-    echo "{\"run_name\":\"${RUN_NAME}\",\"variant\":\"${VARIANT}\",\"lambda\":${LAMBDA},\"status\":\"ok\",\"elapsed_sec\":${ELAPSED}}" >> "$SUMMARY"
+    echo "{\"run_name\":\"${RUN_NAME}\",\"variant\":\"${VARIANT}\",\"lambda\":${LAMBDA},\"seed\":${SEED},\"num_workers\":${NUM_WORKERS},\"deterministic\":${DETERMINISTIC},\"status\":\"ok\",\"elapsed_sec\":${ELAPSED}}" >> "$SUMMARY"
   else
-    echo "{\"run_name\":\"${RUN_NAME}\",\"variant\":\"${VARIANT}\",\"lambda\":${LAMBDA},\"status\":\"failed\",\"exit_code\":${STATUS},\"elapsed_sec\":${ELAPSED}}" >> "$SUMMARY"
+    echo "{\"run_name\":\"${RUN_NAME}\",\"variant\":\"${VARIANT}\",\"lambda\":${LAMBDA},\"seed\":${SEED},\"num_workers\":${NUM_WORKERS},\"deterministic\":${DETERMINISTIC},\"status\":\"failed\",\"exit_code\":${STATUS},\"elapsed_sec\":${ELAPSED}}" >> "$SUMMARY"
     echo "Run ${RUN_NAME} failed; continuing to next lambda"
   fi
 done
