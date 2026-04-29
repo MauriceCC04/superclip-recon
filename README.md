@@ -7,7 +7,7 @@ Course project repository for reproducing a **SuperCLIP-style token-classificati
 This repository is organized around three distinct layers:
 
 1. **Baseline reproduction**  
-   Reproduce the SuperCLIP-style token-classification setup on COCO.
+   Reproduce a SuperCLIP-style token-classification setup on COCO.
 
 2. **Reconstruction-loss extension**  
    Add a lightweight auxiliary reconstruction loss on image-derived features:
@@ -30,12 +30,12 @@ The intended course-project framing is:
 
 This repository includes the code, launchers, and documentation needed to run the project, but it is **not fully self-contained**.
 
-To run it successfully, you still need:
+You still need:
 
 - COCO available at `./data/coco`
 - a valid `vocab.json`
-- a working Python/Conda environment for this repo
-- an HPC environment compatible with the documented SLURM launchers
+- a working Python or Conda environment for this repo
+- an HPC environment compatible with the documented SLURM launchers if you use the HPC path
 - `HF_TOKEN` only if you want to run **Winoground**
 
 For the Bocconi HPC workflow used in this project, read these files in order:
@@ -63,9 +63,9 @@ Typical important paths:
 - `slurm/` — HPC launchers
 - `results/` — raw result JSONs
 - `logs/` — per-run logs
-- `out/`, `err/` — SLURM stdout/stderr
+- `out/`, `err/` — SLURM stdout and stderr
 - `docs/HPC_RUNBOOK.md` — Bocconi HPC operating guide
-- `REPRODUCIBILITY.md` — stage order and validation guidance
+- `REPRODUCIBILITY.md` — stage order, validation, output map, packaging guidance
 - `INCIDENTS.md` — failure patterns and recovery steps
 
 ## Environment setup
@@ -104,7 +104,46 @@ Run in this order:
 4. one clean reconstruction run
 5. only then the larger staged experiments
 
-See `REPRODUCIBILITY.md` for the recommended order.
+See `REPRODUCIBILITY.md` for the exact stage order and validation rules.
+
+## Launcher-to-output map
+
+This is the single most important runability detail in the repo.
+
+Different launchers write to different output locations.
+
+| Launcher | Typical use | Expected outputs |
+| --- | --- | --- |
+| `slurm/run_preflight.sh` | preflight gate | `results/preflight/preflight_report.json` |
+| `slurm/run_gpu_smoke.sh` | short end-to-end GPU gate | `results/smoke/gpu_smoke_results.json`, `checkpoints/smoke/` |
+| `slurm/run_one_experiment.sh` | one training run | by default `results/<RUN_NAME>.json` and `checkpoints/<RUN_NAME>/` unless overridden by exported `RESULTS_FILE` and `SAVE_DIR` |
+| `slurm/run_lambda_sweep.sh` | sequential lambda sweep | `results/ablations/`, `checkpoints/ablations/`, and a summary JSONL under `results/ablations/` |
+| staged / custom SLURM scripts in `slurm/` | report follow-up families | custom subfolders such as `results/confirm6/`, `results/compositional_round2/`, `results/final_checks/`, `results/final_confirm/`, `results/winoground/` |
+
+If you cannot name the exact JSON file a job is supposed to produce, do **not** treat that job as reproducible yet.
+
+## What counts as a successful stage
+
+A stage is not considered successful until:
+
+- the SLURM job finished with `COMPLETED` and `0:0`
+- the expected JSON file exists in the expected folder
+- the JSON contains real metrics, not `{}` or a partial schema
+- `out/` and `err/` do not show a real failure such as `Traceback`, `No space left`, `403`, or `[SKIP]`
+- the result files have been synced locally if they matter for the report
+
+A run is not reproducible unless you can point to the exact JSON file it produced.
+
+## Known-good gate artifacts
+
+These are the minimum files you should expect before moving to larger experiments.
+
+| Stage | Minimum artifact to verify |
+| --- | --- |
+| preflight | `results/preflight/preflight_report.json` |
+| GPU smoke | `results/smoke/gpu_smoke_results.json` |
+| pilot baseline | `results/pilot_varA.json` |
+| pilot reconstruction | `results/pilot_varB.json` |
 
 ## Very important HPC note
 
@@ -112,12 +151,11 @@ On Bocconi HPC, do **not** submit many independent jobs at once just because mul
 
 Use one stage at a time, verify outputs, and then move to the next stage.
 
-A stage is not considered successful until:
+Also note:
 
-- the SLURM job finished with `COMPLETED` and `0:0`
-- the expected JSON files exist
-- the JSON files contain real metrics, not empty objects
-- the result files have been synced locally if they matter for the report
+- some committed SLURM headers contain the original project account details such as `3202029`
+- if you are not running on that same account, prefer the wrapped `sbatch --wrap='cd ... && bash ...'` commands documented in `docs/HPC_RUNBOOK.md`
+- always `cd` into the repo root before using `tail`, `find`, `grep`, or destructive cleanup commands
 
 ## Winoground note
 
@@ -143,6 +181,7 @@ Before a long run:
 - confirm quota headroom
 - confirm the launcher script path and output directory
 - confirm where the JSON will be written
+- confirm you are in the repo root, not on your Mac in the wrong folder
 
 After a long run:
 
@@ -159,11 +198,13 @@ After a long run:
 - packaging only one subfolder into a zip
 - deleting checkpoints before syncing the result JSONs
 - running Winoground without confirmed HF access
+- tailing the wrong log because you are not in the repo root
+- using `run_one_experiment.sh` without exporting all required variables
 
 ## Documentation
 
-- `REPRODUCIBILITY.md` — exact stage order, validation, result-folder map, packaging guidance
-- `docs/HPC_RUNBOOK.md` — Bocconi HPC operational rules and cleanup guidance
+- `REPRODUCIBILITY.md` — exact stage order, validation rules, launcher-to-output map, packaging guidance
+- `docs/HPC_RUNBOOK.md` — Bocconi HPC operating guide, exact gate commands, cleanup guidance, common failure signatures
 - `INCIDENTS.md` — known failure modes and the next command to run when they happen
 
 ## Summary
