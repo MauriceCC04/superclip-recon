@@ -31,6 +31,7 @@ It is also the source of truth for the project’s reproducibility rules:
 8. For matched baseline vs improvement comparisons, prefer `NUM_WORKERS=0 DETERMINISTIC=1 NO_AMP=1` if you want the cleanest reproducibility.
 9. When using `slurm/run_one_experiment.sh`, always set `RUN_NAME`, `VARIANT`, `LAMBDA_RECON`, and `MASK_RATIO`.
 10. If you rerun a single configuration outside a sweep, explicitly set `SAVE_DIR` and `RESULTS_FILE` so outputs land in the intended folder.
+11. The first ARO or Winoground run on a fresh cache may spend noticeable time downloading datasets or generating splits before real evaluation progress appears.
 
 ---
 
@@ -56,6 +57,19 @@ Every real run should record at least:
 - argv
 
 If a result file does not contain these fields, treat it as lower-confidence evidence.
+
+### Git commit provenance on the HPC copy
+
+`train.py` records `git_commit` on a best-effort basis. This is useful, but the normal HPC sync intentionally excludes `.git` to keep transfers light.
+
+That means the HPC copy may legitimately produce:
+
+- `git_commit: null` in a result JSON
+- a terminal log line like `fatal: not a git repository ...`
+
+Treat that as missing provenance metadata, not as a model failure, if the run otherwise completed and wrote its outputs.
+
+If exact revision tracking matters for a reporting run, record `git rev-parse HEAD` on the Mac before syncing, or store the SHA explicitly in a lightweight tracked note.
 
 ### Clean comparison rules
 
@@ -183,6 +197,8 @@ rsync -av --delete \
 ```
 
 This preserves the large data and vocab already stored on HPC.
+
+It also means the HPC copy is usually **not** a full Git checkout. So a successful run may still end with a best-effort metadata message like `fatal: not a git repository ...` when `train.py` tries to record the commit SHA. That is usually benign.
 
 ### 1.2 Sync results from HPC to Mac
 
@@ -457,7 +473,19 @@ Why:
 
 Winoground is fine if you already have a valid `HF_TOKEN` and want an extra supporting check.
 
-### 5.3 Which checkpoints to evaluate
+### 5.3 First-run cache warm-up for ARO and Winoground
+
+The first evaluation-only run on a fresh account or freshly cleaned cache may spend real time on:
+
+- Hugging Face dataset downloads
+- split generation
+- cache population under `HF_HOME` / `HF_DATASETS_CACHE`
+
+This is normal. The log may show long stretches of `Downloading data`, `Generating test split`, or similar output before the evaluator reaches steady-state example progress.
+
+The first Winoground fetch is especially large compared with ARO. If a job appears stuck at `0%` during its first download, check quota and cache paths before concluding that the evaluator itself is broken.
+
+### 5.4 Which checkpoints to evaluate
 
 For a fair comparison, evaluate matched baseline vs recon pairs with the same seed.
 
@@ -467,7 +495,7 @@ Good examples used in this project:
 - `confirm_baseline_varA_l0_s102_b128_e10` vs `confirm_reconA_l1_s102_b128_e10`
 - fresh seed-103 matched pairs created only for compositional follow-up
 
-### 5.4 Best checkpoint selection
+### 5.5 Best checkpoint selection
 
 With `last_and_best`, two checkpoints often remain, for example `epoch_9.pt` and `epoch_10.pt`.
 
@@ -476,7 +504,7 @@ Do **not** blindly assume `epoch_10.pt` is the best checkpoint. If the distincti
 - inspect the run log for which checkpoint was designated best
 - or use an explicit helper function in your evaluation script to choose the intended checkpoint consistently
 
-### 5.5 Stock compositional script caveat
+### 5.6 Stock compositional script caveat
 
 `slurm/run_compositional_eval.sh` is fine for simple baseline / variant_a / variant_b folder layouts, but it is not enough for arbitrary named checkpoint families like:
 
@@ -486,7 +514,7 @@ Do **not** blindly assume `epoch_10.pt` is the best checkpoint. If the distincti
 
 For those, use a small custom sequential script that points directly at the desired checkpoint directories.
 
-### 5.6 Safe compositional workflow
+### 5.7 Safe compositional workflow
 
 1. verify the checkpoint dirs you need actually exist on HPC
 2. if they do not, copy them back from your laptop first
@@ -544,9 +572,11 @@ A safe pattern that worked repeatedly during the project:
 
 ## 7. Monitoring and post-mortem
 
-### 7.1 During training
+### 7.1 During training or eval-only runs
 
 Training progress usually lives in `err/` because `tqdm` and warnings often write there.
+
+The same is often true for pure ARO or Winoground evaluation jobs, so `err/` is still the first place to look for example-level progress.
 
 ```bash
 tail -f err/<job>.err
@@ -581,6 +611,20 @@ Because `tqdm` rewrites lines, a plain `tail` can be misleading. If the end look
 ```bash
 tail -c 2000 err/<job>.err | od -c | tail -40
 ```
+
+### 7.5 When a sequential batch ends with `SIGNAL Terminated`
+
+Treat this as a partial-batch recovery problem first, not as proof that every subrun failed.
+
+Use this sequence:
+
+1. run `sacct` for the wrapper job
+2. inspect `out/`, `err/`, and any per-run logs under `logs/`
+3. identify the last subrun or evaluator that clearly finished
+4. keep any result JSONs or completed evaluation outputs already written
+5. rerun only the unfinished tail
+
+This matters because a long sequential wrapper may complete several valid subruns before SLURM terminates the job.
 
 ---
 
@@ -636,6 +680,28 @@ An empty `.err` with a long runtime often means a storage or write-stage failure
 ### Exit `120:0` with no traceback
 
 Check `NodeList` in `sacct` first. If the job ran on `gnode04`, resubmit with `--exclude=gnode04`.
+
+### `fatal: not a git repository (or any parent up to mount point /mnt)` at the end of a run
+
+This is usually a provenance warning, not a training failure. The default HPC sync excludes `.git`, so the best-effort `git rev-parse HEAD` call may fail even when the model run itself succeeded.
+
+Treat it as benign if:
+
+1. `sacct` says the job completed normally
+2. the expected result JSON exists
+3. the log shows the usual completion markers such as `Results saved to ...`
+
+### `*** JOB ... DUE to SIGNAL Terminated ***`
+
+Treat this as an external wrapper termination first. Check how much of the batch completed before the kill, keep the finished artifacts, and rerun only the unfinished tail.
+
+### Benign warning clusters: `QuickGELU`, `TRANSFORMERS_CACHE`, or `torch.cuda.amp` deprecations
+
+These warnings are noisy but are not, by themselves, evidence that the run failed.
+
+- `QuickGELU` is a model-config warning from `open_clip`
+- `TRANSFORMERS_CACHE` is a deprecation warning; the cache still works, but newer tooling prefers `HF_HOME`
+- `torch.cuda.amp` warnings indicate future API migration work, not an immediate runtime break
 
 ### Job finishes with `COMPLETED 0:0` but you are not sure it succeeded
 
