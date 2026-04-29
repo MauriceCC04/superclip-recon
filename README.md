@@ -1,245 +1,176 @@
 # SuperCLIP-Recon
 
-SuperCLIP-Recon is a CLIP-based image-text retrieval project built around the COCO Captions dataset.
+Course project repository for reproducing a **SuperCLIP-style token-classification baseline** and evaluating a lightweight **caption reconstruction auxiliary loss** on top of it.
 
-The repository contains:
+## Project scope
 
-- a **baseline path** built around CLIP retrieval plus token classification
-- a **reconstruction path** that adds caption reconstruction
-- **Variant A** as the baseline anchor used throughout the project
-- **Variant B** as a phrase-reconstruction extension
+This repository is organized around three distinct layers:
 
-The project was run primarily on Bocconi HPC, and the repository reflects that workflow.
+1. **Baseline reproduction**  
+   Reproduce the SuperCLIP-style token-classification setup on COCO.
 
-For anything about actually running, monitoring, recovering, or reproducing jobs on the cluster, use these two documents as the source of truth:
+2. **Reconstruction-loss extension**  
+   Add a lightweight auxiliary reconstruction loss on image-derived features:
+   - **Variant A**: masked token prediction
+   - **Variant B**: short phrase reconstruction
 
-- `docs/HPC_RUNBOOK.md`
-- `docs/INCIDENTS.md`
+3. **Report-oriented evaluation**  
+   Run the retrieval, compositional, and follow-up checks used in the report.
 
-Those two docs were updated from the real HPC stderr logs and document the actual operational behavior seen during the project, including cache warm-up, SLURM issues, checkpoint handling, quota failures, partial sequential jobs, and benign warnings.
+The intended course-project framing is:
 
----
+- **Dataset:** MS-COCO Captions
+- **Backbone:** ViT-B/32 initialized from CLIP
+- **Primary metric:** COCO image-text retrieval
+- **Supporting probes:** ARO and Winoground
+- **Main comparison:** baseline vs Variant A with matched seeds
+- **Extension check:** Variant B at limited scope
 
-## What is in the repository
+## What “runnable” means here
 
-The code is already separated by role:
+This repository includes the code, launchers, and documentation needed to run the project, but it is **not fully self-contained**.
 
-- **Data processing**
-  - `build_vocab.py`
-  - `dataset.py`
-- **Model definition**
-  - `model.py`
-  - `config.py`
-- **Training**
-  - `train.py`
-  - `losses.py`
-  - `slurm/run_one_experiment.sh`
-- **Evaluation**
-  - `evaluate.py`
-  - `eval_compositional.py`
-  - `analyze_results.py`
-- **HPC orchestration**
-  - `slurm/`
-- **Operational documentation**
-  - `docs/HPC_RUNBOOK.md`
-  - `docs/INCIDENTS.md`
+To run it successfully, you still need:
 
----
+- COCO available at `./data/coco`
+- a valid `vocab.json`
+- a working Python/Conda environment for this repo
+- an HPC environment compatible with the documented SLURM launchers
+- `HF_TOKEN` only if you want to run **Winoground**
 
-## Setup
+For the Bocconi HPC workflow used in this project, read these files in order:
 
-### Python environment
+1. `REPRODUCIBILITY.md`
+2. `docs/HPC_RUNBOOK.md`
+3. `INCIDENTS.md`
 
-For package installation, use the dependency versions in:
+## What this repository is for
+
+Use this repo if you want to:
+
+- train the baseline and reconstruction variants
+- reproduce the report-oriented result folders
+- validate whether a run actually succeeded
+- package the correct raw result files for review
+
+## Repository layout
+
+Typical important paths:
+
+- `train.py` — main training entry point
+- `eval_compositional.py` — ARO / Winoground evaluation
+- `scripts/reproduce_report.sh` — staged helper for report reproduction
+- `slurm/` — HPC launchers
+- `results/` — raw result JSONs
+- `logs/` — per-run logs
+- `out/`, `err/` — SLURM stdout/stderr
+- `docs/HPC_RUNBOOK.md` — Bocconi HPC operating guide
+- `REPRODUCIBILITY.md` — stage order and validation guidance
+- `INCIDENTS.md` — failure patterns and recovery steps
+
+## Environment setup
+
+Install the dependencies in your preferred environment.
+
+Example:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-The repo expects at least the packages listed in `requirements.txt`, including `torch`, `open_clip_torch`, `transformers`, `pycocotools`, `datasets`, and `matplotlib`.
+If you use Conda on HPC, activate the environment described in the runbook before submitting jobs.
 
-### Data layout
+## Data expectations
 
-The code expects COCO under:
+The repository expects COCO under:
 
 ```text
-data/coco/
-├── annotations/
-│   ├── captions_train2017.json
-│   └── captions_val2017.json
-├── train2017/
-└── val2017/
+./data/coco
 ```
 
-If `vocab.json` is missing, build it with the script already present in the repo:
+You should have the standard images and caption annotations needed by the training and evaluation scripts.
 
-```bash
-python build_vocab.py --coco_root ./data/coco --top_k 1000 --output vocab.json
-```
+This repository does **not** redistribute COCO.
 
-### HPC environment
+## Recommended first steps
 
-Do not rely on this README for the cluster setup details.
+Do **not** start with a long training job.
 
-Use:
+Run in this order:
 
-- `docs/HPC_RUNBOOK.md` for environment setup, conda activation, cache locations, job submission, monitoring, recovery, and reproducibility rules
-- `docs/INCIDENTS.md` for the real failure modes encountered during the project and the decisions taken to handle them
+1. preflight checks
+2. GPU smoke test
+3. one clean baseline run
+4. one clean reconstruction run
+5. only then the larger staged experiments
 
----
+See `REPRODUCIBILITY.md` for the recommended order.
 
-## Main entry points
+## Very important HPC note
 
-### Train one experiment
+On Bocconi HPC, do **not** submit many independent jobs at once just because multiple launchers exist.
 
-The main training entry point is:
+Use one stage at a time, verify outputs, and then move to the next stage.
 
-```bash
-python train.py \
-  --coco_root ./data/coco \
-  --vocab_path ./vocab.json \
-  --run_name baseline \
-  --train_mode superclip_baseline \
-  --variant A \
-  --lambda_recon 0.0 \
-  --mask_ratio 0.15 \
-  --epochs 10 \
-  --batch_size 128 \
-  --lr 1e-5 \
-  --save_dir ./checkpoints/baseline \
-  --results_file ./results/baseline.json
-```
+A stage is not considered successful until:
 
-For real HPC runs, the project normally goes through:
+- the SLURM job finished with `COMPLETED` and `0:0`
+- the expected JSON files exist
+- the JSON files contain real metrics, not empty objects
+- the result files have been synced locally if they matter for the report
 
-```bash
-bash slurm/submit_main_experiments.sh
-```
+## Winoground note
 
-or directly through:
+Winoground is gated.
 
-```bash
-sbatch slurm/run_one_experiment.sh
-```
+A valid `HF_TOKEN` may still be insufficient if the Hugging Face account does not have access to the dataset. In that case, a job may finish but produce empty or skipped outputs.
 
-with the required environment variables described in `docs/HPC_RUNBOOK.md`.
+Always inspect the resulting JSON files.
 
-### Evaluate COCO retrieval
+## Report-oriented result folders
 
-```bash
-python evaluate.py --checkpoint ./checkpoints/baseline/epoch_10.pt --coco_root ./data/coco
-```
+The report evidence is spread across multiple subfolders under `results/`.
 
-### Run compositional evaluation
+Do **not** assume that one folder contains everything.
 
-```bash
-python eval_compositional.py \
-  --checkpoint ./checkpoints/baseline/epoch_10.pt \
-  --benchmark aro \
-  --output ./results/compositional_baseline.json
-```
+The most important report-related folders are documented in `REPRODUCIBILITY.md`.
 
-The evaluator supports:
+## Minimal runability checklist
 
-- `--benchmark aro`
-- `--benchmark winoground`
-- `--benchmark all`
+Before a long run:
 
-The real logs showed that `--benchmarks` is wrong; the correct flag is singular: `--benchmark`.
+- confirm queue status
+- confirm quota headroom
+- confirm the launcher script path and output directory
+- confirm where the JSON will be written
 
-### Build summary plots and tables
+After a long run:
 
-```bash
-python scripts/build_results_bundle.py --results_dir ./results
-```
+- check `sacct`
+- inspect the expected result JSON
+- inspect `out/` and `err/`
+- sync result files before deleting checkpoints
 
-This script uses the existing `analyze_results.py` utilities and writes derived artifacts into:
+## Common pitfalls
 
-- `results/figures/`
-- `results/tables/`
+- running an HPC path command on your Mac
+- assuming `COMPLETED` means the JSON is usable
+- forgetting that results may be spread across multiple `results/*` folders
+- packaging only one subfolder into a zip
+- deleting checkpoints before syncing the result JSONs
+- running Winoground without confirmed HF access
 
-It also creates `results/qualitative/` as the reserved place for qualitative report artifacts.
+## Documentation
 
----
+- `REPRODUCIBILITY.md` — exact stage order, validation, result-folder map, packaging guidance
+- `docs/HPC_RUNBOOK.md` — Bocconi HPC operational rules and cleanup guidance
+- `INCIDENTS.md` — known failure modes and the next command to run when they happen
 
-## Results layout
+## Summary
 
-The repository uses `results/` for raw outputs and report artifacts.
+This repository is designed to be **runnable and reviewable** for the course project, provided that the user follows the documented stage order and validation checks.
 
-Raw outputs from training / evaluation jobs appear in locations such as:
+For actual execution, start with:
 
-- `results/confirm6/`
-- `results/final_checks/`
-- `results/compositional/`
-- `results/compositional_round2/`
-- `results/winoground/`
-
-Report-ready artifacts are kept separately in:
-
-- `results/figures/`
-- `results/tables/`
-- `results/qualitative/`
-
-For the detailed folder convention, see `results/README.md`.
-
----
-
-## HPC scripts that are actually present in the repository
-
-The following project scripts are present and correspond to runs reflected in the stderr logs:
-
-### Main / training
-
-- `slurm/submit_main_experiments.sh`
-- `slurm/run_one_experiment.sh`
-- `slurm/run_confirm6_sequential.sh`
-- `slurm/run_maskrate_l1_seed102.sh`
-- `slurm/run_variantB_seed104_check.sh`
-
-### Compositional / evaluation
-
-- `slurm/run_compositional_confirm_pair.sh`
-- `slurm/run_compositional_round2.sh`
-- `slurm/run_winoground_bestpair.sh`
-
-### Analysis / reporting
-
-- `scripts/build_results_bundle.py`
-- `analyze_results.py`
-
-This README intentionally does **not** claim more than that.
-
----
-
-## What the stderr logs showed in practice
-
-The attached HPC error logs and the runbook/incidents docs reinforce a few practical rules:
-
-- monitor training progress in `err/` first, because `tqdm` and warnings often write there
-- for sequential wrappers, also check `out/` and `logs/`
-- the first ARO or Winoground evaluation may spend real time downloading datasets or building cache before steady-state example progress appears
-- `fatal: not a git repository` at the end of a completed run is usually benign on the HPC copy, because `.git` is intentionally excluded from normal syncs
-- `SIGNAL Terminated` on a long sequential batch does **not** necessarily mean the whole batch failed; some subruns may already be valid and worth keeping
-- if `slurm/run_one_experiment.sh` is used directly, `RUN_NAME`, `VARIANT`, `LAMBDA_RECON`, and `MASK_RATIO` must be set
-
-All of that is documented in more detail in:
-
-- `docs/HPC_RUNBOOK.md`
-- `docs/INCIDENTS.md`
-
----
-
-## Reproducibility note
-
-This repository contains the code and several real HPC launchers used during the project.
-
-However, the authoritative instructions for reproducing the project workflow are in the HPC runbook, because that is where the real cluster constraints, job patterns, cache behavior, output paths, and recovery rules are documented.
-
-If you want to reproduce the project from the repository:
-
-1. set up the data and `vocab.json`
-2. follow `docs/HPC_RUNBOOK.md` for environment and submission
-3. use the real scripts listed above
-4. use `scripts/build_results_bundle.py` to generate tables and plots from the resulting JSON outputs
-
-That is the current, grounded path supported by the repository as it exists now.
+- `REPRODUCIBILITY.md`
+- then `docs/HPC_RUNBOOK.md`

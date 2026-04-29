@@ -1,219 +1,329 @@
-# Reproducibility Guide
+# Reproducibility and Runability Guide
 
-This document explains how to reproduce the experiments described in the report from this repository.
+This document explains how to run the project in a way that is consistent with the report and with the actual Bocconi HPC constraints encountered during development.
 
-The repository already contains the exact SLURM launchers used during the project. The goal of this guide is to make the execution order explicit and to point to the expected output locations.
+This is a **runability-first** guide. Its purpose is to help a user:
 
----
-
-## 1. Prerequisites
-
-Before launching experiments, make sure the following are available:
-
-- Python dependencies installed from `requirements.txt`
-- COCO 2017 images and captions under `data/coco/`
-- `vocab.json` present in the repo root
-- on Bocconi HPC: the `superclip` environment and the setup in `docs/HPC_RUNBOOK.md`
-
-If `vocab.json` is missing:
-
-```bash
-python build_vocab.py --coco_root ./data/coco --top_k 1000 --output vocab.json
-```
+- launch the stages in the correct order
+- avoid common HPC mistakes
+- verify whether a run really succeeded
+- package the correct raw results for review
 
 ---
 
-## 2. Recommended execution order
+## 1. Scope of the report workflow
 
-The safest way to reproduce the report is to run one stage at a time.
+The report is built around three layers:
 
-A helper script is provided for this:
+### Baseline anchor
+- SuperCLIP-style token classification
+- COCO retrieval as the primary metric
 
-```bash
-bash scripts/reproduce_report.sh plan
-```
+### Main extension
+- Variant A reconstruction loss
+- matched baseline vs reconA comparisons with the same seed
 
-That prints the recommended order below.
-
-### Stage A — main study
-
-Runs the three main report configurations:
-
-- baseline (`lambda_recon=0`, Variant A)
-- Variant A reconstruction
-- Variant B reconstruction
-
-Command:
-
-```bash
-bash scripts/reproduce_report.sh main
-```
-
-Primary scripts used:
-
-- `slurm/submit_main_experiments.sh`
-- `slurm/run_one_experiment.sh`
-
-Expected raw outputs:
-
-- `results/baseline.json`
-- `results/variant_a.json`
-- `results/variant_b.json`
-- `checkpoints/baseline/`
-- `checkpoints/variant_a/`
-- `checkpoints/variant_b/`
-
-### Stage B — matched confirmation runs
-
-Reproduces the strict same-seed confirmation runs used to strengthen the main comparison.
-
-Commands:
-
-```bash
-bash scripts/reproduce_report.sh confirm6
-bash scripts/reproduce_report.sh confirm_more
-```
-
-Primary scripts used:
-
-- `slurm/run_confirm6_sequential.sh`
-- `slurm/run_confirm_more_sequential.sh`
-
-Expected raw outputs:
-
-- `results/confirm6/`
-- `results/confirm8/`
-- matching checkpoint folders under `checkpoints/`
-
-### Stage C — targeted ablations / extra checks
-
-Reproduces the report-side follow-up checks:
-
+### Follow-up checks
+- ARO
+- Winoground
 - mask-rate ablation
-- extra Variant B seed check
+- limited Variant B confirmation
 
-Command:
+The intended interpretation is:
 
-```bash
-bash scripts/reproduce_report.sh ablations
-```
+- **baseline first**
+- then **reconA comparison**
+- then **supporting compositional/follow-up checks**
 
-Primary scripts used:
-
-- `slurm/run_maskrate_l1_seed102.sh`
-- `slurm/run_variantB_seed104_check.sh`
-
-Expected raw outputs:
-
-- `results/final_checks/`
-- matching checkpoint folders under `checkpoints/final_checks/`
-
-### Stage D — compositional evaluation
-
-Reproduces the ARO-based compositional probes used as supporting evidence.
-
-Command:
-
-```bash
-bash scripts/reproduce_report.sh compositional_core
-```
-
-Primary scripts used:
-
-- `slurm/run_compositional_confirm_pair.sh`
-- `slurm/run_compositional_round2.sh`
-
-Expected raw outputs:
-
-- `results/compositional/`
-- `results/compositional_round2/`
-
-### Stage E — optional Winoground / extra compositional runs
-
-These require `HF_TOKEN` and are supporting, not mandatory, report reproduction stages.
-
-Command:
-
-```bash
-bash scripts/reproduce_report.sh compositional_plus
-```
-
-Primary scripts used:
-
-- `slurm/run_compositional_seed104.sh`
-- `slurm/run_winoground_bestpair.sh`
-- `slurm/run_compositional_more.sh`
-
-Expected raw outputs:
-
-- `results/final_confirm/`
-- `results/winoground/`
-- `results/compositional_round3/`
-
-### Stage F — report artifacts
-
-Once raw JSON results are present, generate the report-ready tables and plots:
-
-```bash
-bash scripts/reproduce_report.sh analyze
-```
-
-This runs:
-
-```bash
-python scripts/build_results_bundle.py --results_dir ./results
-```
-
-Expected derived outputs:
-
-- `results/figures/`
-- `results/tables/`
-- `results/qualitative/`
+Do not treat Variant B as the main baseline anchor.
 
 ---
 
-## 3. What is already separated in the repository
+## 2. External prerequisites
 
-The repository keeps the main project concerns in separate modules:
+This repository is not fully self-contained.
 
-- **Data processing**
-  - `build_vocab.py`
-  - `dataset.py`
-- **Model definition**
-  - `model.py`
-- **Training**
-  - `train.py`
-  - `losses.py`
-  - `slurm/run_one_experiment.sh`
-- **Evaluation**
-  - `evaluate.py`
-  - `eval_compositional.py`
-  - `analyze_results.py`
+You must provide:
 
-This means the code path for data preparation, model construction, training, and evaluation can be inspected independently.
+- COCO under `./data/coco`
+- `vocab.json`
+- a working environment with the packages in `requirements.txt`
+- access to the Bocconi HPC resources if using the SLURM launchers
+- `HF_TOKEN` for Winoground only
+
+If you are on Bocconi HPC, also read:
+
+- `docs/HPC_RUNBOOK.md`
+- `INCIDENTS.md`
 
 ---
 
-## 4. Results convention
+## 3. Start small: required execution order
 
-Raw experiment outputs are stored close to the corresponding experiment family, for example:
+Do not begin with a large staged run.
+
+Recommended order:
+
+1. **preflight**
+2. **GPU smoke**
+3. **one clean baseline/recon sanity pair**
+4. **main retrieval runs**
+5. **ablations**
+6. **ARO / compositional follow-up**
+7. **Winoground**
+8. **final packaging**
+
+If you use the staged helper, inspect it first and then run one stage at a time.
+
+Example:
+
+```bash
+bash scripts/reproduce_report.sh --help
+```
+
+Typical report-oriented stages include:
+
+- `preflight`
+- `smoke`
+- `main`
+- `ablations`
+- `compositional_core`
+- `compositional_plus`
+- `final_confirm`
+
+Important: a “stage” is a logical unit, not necessarily one SLURM job. Some stages may still submit multiple jobs internally. On Bocconi HPC, do not advance to the next stage until the current one has been validated.
+
+---
+
+## 4. Required verification after every stage
+
+A stage is **not** considered successful until all of the following are true.
+
+### 4.1 Check SLURM completion
+
+```bash
+sacct -u <USER> -P --format=JobID,JobName,State,Elapsed,ExitCode -S today
+```
+
+You want:
+- `COMPLETED`
+- `0:0`
+
+### 4.2 Check expected result files exist
+
+```bash
+find results -type f | sort
+```
+
+### 4.3 Open the JSONs and confirm they are non-empty
+
+A job can finish and still produce `{}` or partial outputs.
+
+Use:
+
+```bash
+python - <<'PY'
+import json, sys
+for f in sys.argv[1:]:
+    with open(f) as fh:
+        d = json.load(fh)
+    print(f, "EMPTY" if not d else sorted(d.keys()))
+PY results/some_file.json
+```
+
+### 4.4 Check `out/` and `err/`
+
+Search for real failures:
+
+```bash
+grep -R "Traceback\|No space left\|403\|Killed\|\[SKIP\]" -n out err
+```
+
+### 4.5 Sync important result JSONs locally
+
+Do this **before** deleting checkpoints or clearing quota-heavy directories.
+
+---
+
+## 5. Expected metric keys
+
+Use these as your first-pass validation standard.
+
+### Retrieval result JSONs
+
+Expected patterns include fields such as:
+- `best_retrieval`
+- `best_retrieval_score`
+- `final_retrieval`
+- `history`
+
+and retrieval metrics such as:
+- `i2t_r1`, `i2t_r5`, `i2t_r10`
+- `t2i_r1`, `t2i_r5`, `t2i_r10`
+
+### ARO JSONs
+
+Expected keys:
+- `aro_vg_attribution_accuracy`
+- `aro_vg_attribution_n`
+- `aro_vg_relation_accuracy`
+- `aro_vg_relation_n`
+
+### Winoground JSONs
+
+Expected keys:
+- `winoground_text_score`
+- `winoground_image_score`
+- `winoground_group_score`
+- `winoground_n`
+
+If a Winoground JSON is `{}`, do **not** count it as a valid run.
+
+---
+
+## 6. Winoground caveat
+
+Winoground is a gated dataset.
+
+You need:
+- `HF_TOKEN`
+- approved access for that Hugging Face account
+
+A Winoground job may finish even when access is missing, but produce empty or skipped outputs.
+
+Before counting a Winoground result as valid, confirm that the JSON includes:
+
+- `winoground_text_score`
+- `winoground_image_score`
+- `winoground_group_score`
+- `winoground_n`
+
+---
+
+## 7. Report evidence map
+
+The report evidence is spread across multiple result folders. Do **not** package only one subfolder unless you are certain it contains all report-required outputs.
+
+Typical report-relevant folders from this project history are:
 
 - `results/confirm6/`
-- `results/final_checks/`
+  - matched seed retrieval confirmations
 - `results/compositional_round2/`
+  - additional retrieval + ARO follow-up
+- `results/winoground/`
+  - Winoground outputs
+- `results/final_checks/`
+  - mask-rate and limited Variant B follow-up checks
+- `results/final_confirm/`
+  - later confirmation family, including extra seed checks
 
-Report-ready artifacts are stored in the dedicated presentation layer:
+Before creating a zip, always run:
 
-- `results/figures/`
-- `results/tables/`
-- `results/qualitative/`
+```bash
+find results -type f | sort
+```
 
-This keeps the reproducibility artifacts separate from the raw run logs and per-run JSON files.
+and make sure the archive contains every report-relevant subfolder you intend to claim.
 
 ---
 
-## 5. Notes
+## 8. Common HPC-safe workflow
 
-- On Bocconi HPC, prefer reproducing one stage at a time instead of submitting everything at once.
-- Some optional Winoground steps require `HF_TOKEN`.
-- For cluster-specific recovery steps, cache handling, and troubleshooting, always defer to `docs/HPC_RUNBOOK.md`.
+### Before launching a long job
+
+```bash
+squeue -u <USER>
+lquota
+du -sh checkpoints results logs ~/.cache out err 2>/dev/null
+```
+
+Confirm:
+- you are under job-count limits
+- you have quota headroom
+- you know exactly where JSONs will be written
+
+### After a long run
+
+```bash
+sacct -u <USER> -P --format=JobID,JobName,State,Elapsed,ExitCode -S today
+find results -type f | sort
+```
+
+Then inspect the specific JSONs and logs.
+
+---
+
+## 9. Syncing results locally
+
+If you want to sync the repo back to your Mac but skip checkpoints and data:
+
+```bash
+rsync -av --progress \
+  --exclude 'checkpoints/' \
+  --exclude '**/checkpoints/' \
+  --exclude 'data/' \
+  --exclude '**/data/' \
+  --exclude '.git/' \
+  --exclude '__pycache__/' \
+  --exclude '*.pyc' \
+  bocconi-hpc:/mnt/beegfsstudents/home/3202029/superclip-recon/ \
+  ~/superclip_hpc_backup/superclip-recon/
+```
+
+This keeps:
+- scripts
+- results
+- logs
+- docs
+- code
+
+and skips:
+- checkpoints
+- COCO data
+
+---
+
+## 10. Packaging checklist
+
+Before you create the final zip:
+
+1. Run:
+   ```bash
+   find results -type f | sort
+   ```
+2. Confirm all report-relevant folders are present
+3. Confirm the important JSONs are non-empty
+4. Confirm Winoground files are real, not `{}`
+
+A very common failure mode is:
+- the runs were completed on HPC
+- but later result folders were omitted from the zip
+
+Do not assume the archive is correct just because the HPC run succeeded.
+
+---
+
+## 11. Practical rules
+
+- Run one stage at a time
+- Validate outputs before advancing
+- Sync JSONs before deleting checkpoints
+- Never rely on SLURM status alone
+- Never rely on folder names alone
+- Always inspect the actual JSON contents
+
+---
+
+## 12. Bottom line
+
+A stage is only “done” when:
+
+- the SLURM job finished cleanly
+- the expected JSON files exist
+- those JSON files contain real metrics
+- the results have been safely copied into your local evidence bundle
+
+If something behaves strangely, go next to:
+
+- `docs/HPC_RUNBOOK.md`
+- `INCIDENTS.md`
