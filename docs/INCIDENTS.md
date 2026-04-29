@@ -300,6 +300,39 @@ This pattern showed up in corrupted pasted scripts and invalid flag usage. It is
 
 ---
 
+### F4. `SIGNAL Terminated` can kill the tail of a sequential batch after earlier steps already succeeded
+
+**Symptom.** Longer sequential jobs such as the mask-rate batch and the later compositional-round batch made real progress, then ended with a SLURM trailer like:
+
+```text
+*** JOB <JOBID> ON <NODE> CANCELLED ... DUE to SIGNAL Terminated ***
+```
+
+**Cause.** External SLURM termination or cancellation after part of the wrapper had already finished. From the stderr logs alone, the exact upstream reason is not always recoverable, but the important point is that the batch may already contain valid completed subruns before the kill.
+
+**Decision.** Treat partial sequential batches as salvageable by default. Inspect which subrun or evaluation finished last, keep the artifacts already written, and rerun only the unfinished tail instead of discarding the whole batch.
+
+**Runbook change.** Added a partial-batch recovery rule and a troubleshooting entry for `SIGNAL Terminated` in sequential jobs.
+
+---
+
+### F5. `fatal: not a git repository` at the end of a successful run is alarming but usually benign on the HPC copy
+
+**Symptom.** Many completed training logs ended with:
+
+```text
+fatal: not a git repository (or any parent up to mount point /mnt)
+Stopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).
+```
+
+**Cause.** `train.py` records `git_commit` via a best-effort `git rev-parse HEAD`, but the normal HPC `rsync` excludes `.git`, so the HPC copy is often not a real Git checkout.
+
+**Decision.** Do not treat this line as a training failure if the job otherwise completed and wrote results. Treat it as missing provenance metadata. If exact revision tracking matters, record the commit SHA on the Mac before syncing or store it explicitly in a lightweight tracked note.
+
+**Runbook change.** The runbook now explains why this message appears, why it is usually benign, and how to preserve commit provenance when needed.
+
+---
+
 ## G. Project-level decisions reinforced during execution
 
 ### G1. The proposal still defines the finish line
@@ -337,3 +370,4 @@ This became the preferred comparison template for confirmation runs and composit
 - **A formal “best checkpoint” marker.** The project still relies on inferring or choosing the intended checkpoint from the saved files and logs. A future maintainer could make this explicit in metadata.
 - **A more general compositional-eval launcher.** The stock compositional SLURM script still assumes simplified checkpoint families. A generalized launcher that accepts arbitrary checkpoint dirs would remove the need for ad hoc custom scripts.
 - **Automated retry/backoff for QoS rejections.** The documented workaround is reliable, but the helper scripts still do not back off automatically when the QoS rejects additional submissions.
+- **A lightweight way to preserve Git provenance on HPC copies.** Because the normal sync excludes `.git`, a small tracked file or env-based SHA handoff would make later auditing cleaner without syncing the full Git history.
