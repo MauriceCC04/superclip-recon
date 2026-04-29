@@ -1,0 +1,235 @@
+[common.sh] PROJECT_ROOT=/mnt/beegfsstudents/home/3202029/superclip-recon
+========================================
+Job:        maskrate-l1-s102
+Job ID:     483421
+Node:       gnode02
+Partition:  stud
+Started:    Mon Apr 27 09:21:55 AM CEST 2026
+CWD:        /mnt/beegfsstudents/home/3202029/superclip-recon
+PROJECT:    /mnt/beegfsstudents/home/3202029/superclip-recon
+Python:     /usr/bin/python
+========================================
+[common.sh] Activated env: superclip (/home/3202029/.conda/envs/superclip/bin/python)
+==================================================
+Starting maskrateA_l1_m30_s102_b128_e10
+mask_ratio=0.30
+==================================================
+[common.sh] PROJECT_ROOT=/mnt/beegfsstudents/home/3202029/superclip-recon
+========================================
+Job:        maskrate-l1-s102
+Job ID:     483421
+Node:       gnode02
+Partition:  stud
+Started:    Mon Apr 27 09:21:57 AM CEST 2026
+CWD:        /mnt/beegfsstudents/home/3202029/superclip-recon
+PROJECT:    /mnt/beegfsstudents/home/3202029/superclip-recon
+Python:     /home/3202029/.conda/envs/superclip/bin/python
+========================================
+[common.sh] Activated env: superclip (/home/3202029/.conda/envs/superclip/bin/python)
+Experiment config:
+  RUN_NAME=maskrateA_l1_m30_s102_b128_e10
+  TRAIN_MODE=superclip_recon
+  VARIANT=A
+  LAMBDA_CLIP=1.0
+  LAMBDA_TOKEN_CLS=1.0
+  LAMBDA_RECON=1.0
+  MASK_RATIO=0.30
+  EPOCHS=10  BATCH=128  LR=1e-5
+  SEED=102  NUM_WORKERS=4  DETERMINISTIC=0
+  SAVE=last_and_best keep=1
+Device: cuda
+Run: maskrateA_l1_m30_s102_b128_e10 | requested_mode=superclip_recon | effective_mode=superclip_recon | requested_variant=A | effective_variant=A | lambda_clip=1.0 | lambda_tc=1.0 | lambda_recon=1.0 | mask_ratio=0.3
+Seed / loader: seed=102 | num_workers=4 | deterministic=False | amp=True
+Freeze flags: text=False | vision=False | logit_scale=False
+Checkpoint strategy: last_and_best | keep_last_k=1 | save_optimizer=False
+Reconstruction enabled: True
+Loaded vocab with 1000 token classes
+Param summary: {'clip_total': 151277313, 'clip_trainable': 151277313, 'token_cls_total': 513000, 'token_cls_trainable': 513000, 'recon_total': 25643264, 'recon_trainable': 25643264, 'model_total': 177433577, 'model_trainable': 177433577}
+[Dataset] Loaded 118287 images from ./data/coco/annotations/captions_train2017.json (stochastic caption selection)
+Scheduler: linear warmup for 500 steps, then linear decay over 9240 total steps
+First-step grad summary: {'clip_grad_norm': 300.81092376075685, 'token_cls_grad_norm': 0.11329716071486473, 'recon_grad_norm': 0.7297508101910353}
+Epoch 1 avg losses: clip=0.4127  tc=6.8755  rc=10.2471  total=17.5353
+Saved checkpoint: ./checkpoints/final_checks/maskrateA_l1_m30_s102_b128_e10/epoch_1.pt (677.0 MB)
+Running retrieval evaluation (max_images=5000)...
+[Dataset] Loaded 5000 images from ./data/coco/annotations/captions_val2017.json (stochastic caption selection)
+  I->T R@1=51.42  R@5=77.40  R@10=85.96
+  T->I R@1=38.99  R@5=67.02  R@10=77.73
+  Retrieval score (R-sum@1/5/10 both directions): 398.53
+Epoch 2 avg losses: clip=0.3407  tc=6.7423  rc=6.3850  total=13.4680
+Saved checkpoint: ./checkpoints/final_checks/maskrateA_l1_m30_s102_b128_e10/epoch_2.pt (677.0 MB)
+Running retrieval evaluation (max_images=5000)...
+[Dataset] Loaded 5000 images from ./data/coco/annotations/captions_val2017.json (stochastic caption selection)
+  I->T R@1=56.20  R@5=80.04  R@10=87.30
+  T->I R@1=41.55  R@5=69.67  R@10=79.78
+  Retrieval score (R-sum@1/5/10 both directions): 414.55
+Epoch 3 avg losses: clip=0.2877  tc=6.6509  rc=5.6529  total=12.5916
+Saved checkpoint: ./checkpoints/final_checks/maskrateA_l1_m30_s102_b128_e10/epoch_3.pt (677.0 MB)
+Running retrieval evaluation (max_images=5000)...
+[Dataset] Loaded 5000 images from ./data/coco/annotations/captions_val2017.json (stochastic caption selection)
+  I->T R@1=57.18  R@5=81.60  R@10=89.20
+  T->I R@1=42.41  R@5=70.67  R@10=80.47
+  Retrieval score (R-sum@1/5/10 both directions): 421.53
+Epoch 4 avg losses: clip=0.2498  tc=6.5840  rc=5.5865  total=12.4203
+Saved checkpoint: ./checkpoints/final_checks/maskrateA_l1_m30_s102_b128_e10/epoch_4.pt (677.0 MB)
+Running retrieval evaluation (max_images=5000)...
+[Dataset] Loaded 5000 images from ./data/coco/annotations/captions_val2017.json (stochastic caption selection)
+  I->T R@1=58.64  R@5=83.08  R@10=89.84
+  T->I R@1=43.38  R@5=71.32  R@10=81.35
+  Retrieval score (R-sum@1/5/10 both directions): 427.60
+Epoch 5 avg losses: clip=0.2256  tc=6.5344  rc=5.5491  total=12.3091
+Saved checkpoint: ./checkpoints/final_checks/maskrateA_l1_m30_s102_b128_e10/epoch_5.pt (677.0 MB)
+Running retrieval evaluation (max_images=5000)...
+[Dataset] Loaded 5000 images from ./data/coco/annotations/captions_val2017.json (stochastic caption selection)
+  I->T R@1=58.40  R@5=83.20  R@10=90.52
+  T->I R@1=44.36  R@5=72.63  R@10=82.00
+  Retrieval score (R-sum@1/5/10 both directions): 431.11
+Epoch 6 avg losses: clip=0.2053  tc=6.4975  rc=5.5340  total=12.2368
+Saved checkpoint: ./checkpoints/final_checks/maskrateA_l1_m30_s102_b128_e10/epoch_6.pt (677.0 MB)
+Running retrieval evaluation (max_images=5000)...
+[Dataset] Loaded 5000 images from ./data/coco/annotations/captions_val2017.json (stochastic caption selection)
+  I->T R@1=59.36  R@5=84.26  R@10=91.16
+  T->I R@1=44.82  R@5=73.14  R@10=82.52
+  Retrieval score (R-sum@1/5/10 both directions): 435.26
+Epoch 7 avg losses: clip=0.1840  tc=6.4706  rc=5.5292  total=12.1837
+Saved checkpoint: ./checkpoints/final_checks/maskrateA_l1_m30_s102_b128_e10/epoch_7.pt (677.0 MB)
+Running retrieval evaluation (max_images=5000)...
+[Dataset] Loaded 5000 images from ./data/coco/annotations/captions_val2017.json (stochastic caption selection)
+  I->T R@1=60.56  R@5=84.28  R@10=91.58
+  T->I R@1=45.29  R@5=73.16  R@10=82.82
+  Retrieval score (R-sum@1/5/10 both directions): 437.69
+Epoch 8 avg losses: clip=0.1698  tc=6.4506  rc=5.5217  total=12.1420
+Saved checkpoint: ./checkpoints/final_checks/maskrateA_l1_m30_s102_b128_e10/epoch_8.pt (677.0 MB)
+Running retrieval evaluation (max_images=5000)...
+[Dataset] Loaded 5000 images from ./data/coco/annotations/captions_val2017.json (stochastic caption selection)
+  I->T R@1=61.84  R@5=85.50  R@10=91.72
+  T->I R@1=45.96  R@5=73.79  R@10=83.06
+  Retrieval score (R-sum@1/5/10 both directions): 441.87
+Epoch 9 avg losses: clip=0.1577  tc=6.4382  rc=5.5195  total=12.1154
+Saved checkpoint: ./checkpoints/final_checks/maskrateA_l1_m30_s102_b128_e10/epoch_9.pt (677.0 MB)
+Running retrieval evaluation (max_images=5000)...
+[Dataset] Loaded 5000 images from ./data/coco/annotations/captions_val2017.json (stochastic caption selection)
+  I->T R@1=62.16  R@5=85.60  R@10=92.14
+  T->I R@1=46.55  R@5=74.20  R@10=83.34
+  Retrieval score (R-sum@1/5/10 both directions): 443.99
+Epoch 10 avg losses: clip=0.1451  tc=6.4332  rc=5.5135  total=12.0918
+Saved checkpoint: ./checkpoints/final_checks/maskrateA_l1_m30_s102_b128_e10/epoch_10.pt (677.0 MB)
+Running retrieval evaluation (max_images=5000)...
+[Dataset] Loaded 5000 images from ./data/coco/annotations/captions_val2017.json (stochastic caption selection)
+  I->T R@1=62.72  R@5=86.06  R@10=92.24
+  T->I R@1=46.92  R@5=74.46  R@10=83.48
+  Retrieval score (R-sum@1/5/10 both directions): 445.88
+Results saved to ./results/final_checks/maskrateA_l1_m30_s102_b128_e10.json
+Training complete. Wall time: 60.3 min
+=== maskrateA_l1_m30_s102_b128_e10 complete: Mon Apr 27 10:22:50 AM CEST 2026 ===
+==================================================
+Starting maskrateA_l1_m50_s102_b128_e10
+mask_ratio=0.50
+==================================================
+[common.sh] PROJECT_ROOT=/mnt/beegfsstudents/home/3202029/superclip-recon
+========================================
+Job:        maskrate-l1-s102
+Job ID:     483421
+Node:       gnode02
+Partition:  stud
+Started:    Mon Apr 27 10:22:50 AM CEST 2026
+CWD:        /mnt/beegfsstudents/home/3202029/superclip-recon
+PROJECT:    /mnt/beegfsstudents/home/3202029/superclip-recon
+Python:     /home/3202029/.conda/envs/superclip/bin/python
+========================================
+[common.sh] Activated env: superclip (/home/3202029/.conda/envs/superclip/bin/python)
+Experiment config:
+  RUN_NAME=maskrateA_l1_m50_s102_b128_e10
+  TRAIN_MODE=superclip_recon
+  VARIANT=A
+  LAMBDA_CLIP=1.0
+  LAMBDA_TOKEN_CLS=1.0
+  LAMBDA_RECON=1.0
+  MASK_RATIO=0.50
+  EPOCHS=10  BATCH=128  LR=1e-5
+  SEED=102  NUM_WORKERS=4  DETERMINISTIC=0
+  SAVE=last_and_best keep=1
+Device: cuda
+Run: maskrateA_l1_m50_s102_b128_e10 | requested_mode=superclip_recon | effective_mode=superclip_recon | requested_variant=A | effective_variant=A | lambda_clip=1.0 | lambda_tc=1.0 | lambda_recon=1.0 | mask_ratio=0.5
+Seed / loader: seed=102 | num_workers=4 | deterministic=False | amp=True
+Freeze flags: text=False | vision=False | logit_scale=False
+Checkpoint strategy: last_and_best | keep_last_k=1 | save_optimizer=False
+Reconstruction enabled: True
+Loaded vocab with 1000 token classes
+Param summary: {'clip_total': 151277313, 'clip_trainable': 151277313, 'token_cls_total': 513000, 'token_cls_trainable': 513000, 'recon_total': 25644224, 'recon_trainable': 25644224, 'model_total': 177434537, 'model_trainable': 177434537}
+[Dataset] Loaded 118287 images from ./data/coco/annotations/captions_train2017.json (stochastic caption selection)
+Scheduler: linear warmup for 500 steps, then linear decay over 9240 total steps
+First-step grad summary: {'clip_grad_norm': 300.80166041105986, 'token_cls_grad_norm': 0.11329716071486473, 'recon_grad_norm': 0.6694724191911519}
+Epoch 1 avg losses: clip=0.4130  tc=6.8748  rc=10.3215  total=17.6093
+Saved checkpoint: ./checkpoints/final_checks/maskrateA_l1_m50_s102_b128_e10/epoch_1.pt (677.0 MB)
+Running retrieval evaluation (max_images=5000)...
+[Dataset] Loaded 5000 images from ./data/coco/annotations/captions_val2017.json (stochastic caption selection)
+  I->T R@1=50.82  R@5=76.72  R@10=85.20
+  T->I R@1=38.95  R@5=66.96  R@10=77.78
+  Retrieval score (R-sum@1/5/10 both directions): 396.42
+Epoch 2 avg losses: clip=0.3424  tc=6.7402  rc=6.6384  total=13.7209
+Saved checkpoint: ./checkpoints/final_checks/maskrateA_l1_m50_s102_b128_e10/epoch_2.pt (677.0 MB)
+Running retrieval evaluation (max_images=5000)...
+[Dataset] Loaded 5000 images from ./data/coco/annotations/captions_val2017.json (stochastic caption selection)
+  I->T R@1=55.84  R@5=80.20  R@10=87.76
+  T->I R@1=41.81  R@5=69.74  R@10=79.66
+  Retrieval score (R-sum@1/5/10 both directions): 415.02
+Epoch 3 avg losses: clip=0.2876  tc=6.6481  rc=5.6200  total=12.5557
+Saved checkpoint: ./checkpoints/final_checks/maskrateA_l1_m50_s102_b128_e10/epoch_3.pt (677.0 MB)
+Running retrieval evaluation (max_images=5000)...
+[Dataset] Loaded 5000 images from ./data/coco/annotations/captions_val2017.json (stochastic caption selection)
+  I->T R@1=57.20  R@5=81.46  R@10=89.32
+  T->I R@1=42.54  R@5=70.41  R@10=80.42
+  Retrieval score (R-sum@1/5/10 both directions): 421.35
+Epoch 4 avg losses: clip=0.2501  tc=6.5823  rc=5.5271  total=12.3594
+Saved checkpoint: ./checkpoints/final_checks/maskrateA_l1_m50_s102_b128_e10/epoch_4.pt (677.0 MB)
+Running retrieval evaluation (max_images=5000)...
+[Dataset] Loaded 5000 images from ./data/coco/annotations/captions_val2017.json (stochastic caption selection)
+  I->T R@1=58.22  R@5=82.42  R@10=89.62
+  T->I R@1=43.62  R@5=71.46  R@10=81.22
+  Retrieval score (R-sum@1/5/10 both directions): 426.57
+Epoch 5 avg losses: clip=0.2255  tc=6.5336  rc=5.4775  total=12.2366
+Saved checkpoint: ./checkpoints/final_checks/maskrateA_l1_m50_s102_b128_e10/epoch_5.pt (677.0 MB)
+Running retrieval evaluation (max_images=5000)...
+[Dataset] Loaded 5000 images from ./data/coco/annotations/captions_val2017.json (stochastic caption selection)
+  I->T R@1=58.34  R@5=83.38  R@10=90.62
+  T->I R@1=43.95  R@5=72.06  R@10=81.70
+  Retrieval score (R-sum@1/5/10 both directions): 430.05
+Epoch 6 avg losses: clip=0.2058  tc=6.4972  rc=5.4650  total=12.1681
+Saved checkpoint: ./checkpoints/final_checks/maskrateA_l1_m50_s102_b128_e10/epoch_6.pt (677.0 MB)
+Running retrieval evaluation (max_images=5000)...
+[Dataset] Loaded 5000 images from ./data/coco/annotations/captions_val2017.json (stochastic caption selection)
+  I->T R@1=59.56  R@5=84.00  R@10=91.14
+  T->I R@1=44.69  R@5=72.80  R@10=82.41
+  Retrieval score (R-sum@1/5/10 both directions): 434.60
+Epoch 7 avg losses: clip=0.1836  tc=6.4707  rc=5.4413  total=12.0956
+Saved checkpoint: ./checkpoints/final_checks/maskrateA_l1_m50_s102_b128_e10/epoch_7.pt (677.0 MB)
+Running retrieval evaluation (max_images=5000)...
+[Dataset] Loaded 5000 images from ./data/coco/annotations/captions_val2017.json (stochastic caption selection)
+  I->T R@1=60.04  R@5=84.70  R@10=91.36
+  T->I R@1=45.07  R@5=73.16  R@10=82.90
+  Retrieval score (R-sum@1/5/10 both directions): 437.23
+Epoch 8 avg losses: clip=0.1697  tc=6.4509  rc=5.4419  total=12.0625
+Saved checkpoint: ./checkpoints/final_checks/maskrateA_l1_m50_s102_b128_e10/epoch_8.pt (677.0 MB)
+Running retrieval evaluation (max_images=5000)...
+[Dataset] Loaded 5000 images from ./data/coco/annotations/captions_val2017.json (stochastic caption selection)
+  I->T R@1=61.22  R@5=85.54  R@10=91.98
+  T->I R@1=46.02  R@5=73.85  R@10=82.91
+  Retrieval score (R-sum@1/5/10 both directions): 441.51
+Epoch 9 avg losses: clip=0.1580  tc=6.4386  rc=5.4353  total=12.0319
+Saved checkpoint: ./checkpoints/final_checks/maskrateA_l1_m50_s102_b128_e10/epoch_9.pt (677.0 MB)
+Running retrieval evaluation (max_images=5000)...
+[Dataset] Loaded 5000 images from ./data/coco/annotations/captions_val2017.json (stochastic caption selection)
+  I->T R@1=61.64  R@5=86.02  R@10=92.14
+  T->I R@1=46.42  R@5=74.22  R@10=83.17
+  Retrieval score (R-sum@1/5/10 both directions): 443.60
+Epoch 10 avg losses: clip=0.1451  tc=6.4337  rc=5.4337  total=12.0125
+Saved checkpoint: ./checkpoints/final_checks/maskrateA_l1_m50_s102_b128_e10/epoch_10.pt (677.0 MB)
+Running retrieval evaluation (max_images=5000)...
+[Dataset] Loaded 5000 images from ./data/coco/annotations/captions_val2017.json (stochastic caption selection)
+  I->T R@1=62.26  R@5=86.38  R@10=92.18
+  T->I R@1=46.83  R@5=74.54  R@10=83.49
+  Retrieval score (R-sum@1/5/10 both directions): 445.68
+Results saved to ./results/final_checks/maskrateA_l1_m50_s102_b128_e10.json
+Training complete. Wall time: 59.7 min
+=== maskrateA_l1_m50_s102_b128_e10 complete: Mon Apr 27 11:23:05 AM CEST 2026 ===
+=== mask-rate ablation complete: Mon Apr 27 11:23:06 AM CEST 2026 ===

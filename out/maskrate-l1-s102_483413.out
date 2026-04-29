@@ -1,0 +1,57 @@
+[common.sh] PROJECT_ROOT=/mnt/beegfsstudents/home/3202029/superclip-recon
+========================================
+Job:        maskrate-l1-s102
+Job ID:     483413
+Node:       gnode02
+Partition:  stud
+Started:    Mon Apr 27 09:04:35 AM CEST 2026
+CWD:        /mnt/beegfsstudents/home/3202029/superclip-recon
+PROJECT:    /mnt/beegfsstudents/home/3202029/superclip-recon
+Python:     /usr/bin/python
+========================================
+[common.sh] Activated env: superclip (/home/3202029/.conda/envs/superclip/bin/python)
+==================================================
+Starting maskrateA_l1_m30_s102_b128_e10
+mask_ratio=0.30
+==================================================
+[common.sh] PROJECT_ROOT=/mnt/beegfsstudents/home/3202029/superclip-recon
+========================================
+Job:        maskrate-l1-s102
+Job ID:     483413
+Node:       gnode02
+Partition:  stud
+Started:    Mon Apr 27 09:04:37 AM CEST 2026
+CWD:        /mnt/beegfsstudents/home/3202029/superclip-recon
+PROJECT:    /mnt/beegfsstudents/home/3202029/superclip-recon
+Python:     /home/3202029/.conda/envs/superclip/bin/python
+========================================
+[common.sh] Activated env: superclip (/home/3202029/.conda/envs/superclip/bin/python)
+Experiment config:
+  RUN_NAME=maskrateA_l1_m30_s102_b128_e10
+  TRAIN_MODE=superclip_recon
+  VARIANT=A
+  LAMBDA_CLIP=1.0
+  LAMBDA_TOKEN_CLS=1.0
+  LAMBDA_RECON=1.0
+  MASK_RATIO=0.30
+  EPOCHS=10  BATCH=128  LR=1e-5
+  SEED=102  NUM_WORKERS=4  DETERMINISTIC=0
+  SAVE=last_and_best keep=1
+Device: cuda
+Run: maskrateA_l1_m30_s102_b128_e10 | requested_mode=superclip_recon | effective_mode=superclip_recon | requested_variant=A | effective_variant=A | lambda_clip=1.0 | lambda_tc=1.0 | lambda_recon=1.0 | mask_ratio=0.3
+Seed / loader: seed=102 | num_workers=4 | deterministic=False | amp=True
+Freeze flags: text=False | vision=False | logit_scale=False
+Checkpoint strategy: last_and_best | keep_last_k=1 | save_optimizer=False
+Reconstruction enabled: True
+Loaded vocab with 1000 token classes
+Param summary: {'clip_total': 151277313, 'clip_trainable': 151277313, 'token_cls_total': 513000, 'token_cls_trainable': 513000, 'recon_total': 25643264, 'recon_trainable': 25643264, 'model_total': 177433577, 'model_trainable': 177433577}
+[Dataset] Loaded 118287 images from ./data/coco/annotations/captions_train2017.json (stochastic caption selection)
+Scheduler: linear warmup for 500 steps, then linear decay over 9240 total steps
+First-step grad summary: {'clip_grad_norm': 300.81092376075685, 'token_cls_grad_norm': 0.11329716071486473, 'recon_grad_norm': 0.7297508101910353}
+Epoch 1 avg losses: clip=0.4127  tc=6.8755  rc=10.2471  total=17.5353
+Saved checkpoint: ./checkpoints/final_checks/maskrateA_l1_m30_s102_b128_e10/epoch_1.pt (677.0 MB)
+Running retrieval evaluation (max_images=5000)...
+[Dataset] Loaded 5000 images from ./data/coco/annotations/captions_val2017.json (stochastic caption selection)
+  I->T R@1=51.42  R@5=77.40  R@10=85.96
+  T->I R@1=38.99  R@5=67.02  R@10=77.73
+  Retrieval score (R-sum@1/5/10 both directions): 398.53

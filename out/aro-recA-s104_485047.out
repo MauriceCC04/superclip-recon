@@ -1,0 +1,18 @@
+Device: cuda
+Loaded checkpoint: ./checkpoints/final_confirm/confirm_reconA_l1_s104_b128_e10/epoch_9.pt
+
+--- ARO VG-Attribution ---
+  Loaded ARO VG-Attribution: 2000 examples
+  Accuracy: 60.9
+
+--- ARO VG-Relation ---
+  Loaded ARO VG-Relation: 2000 examples
+  Accuracy: 50.2
+
+=== Compositional Evaluation Summary ===
+  aro_vg_attribution_accuracy: 60.85
+  aro_vg_attribution_n: 2000
+  aro_vg_relation_accuracy: 50.2
+  aro_vg_relation_n: 2000
+
+Saved to ./results/final_confirm/reconA_s104_l1_varA_aro.json

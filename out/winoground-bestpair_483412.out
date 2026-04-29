@@ -1,0 +1,39 @@
+[common.sh] PROJECT_ROOT=/mnt/beegfsstudents/home/3202029/superclip-recon
+========================================
+Job:        winoground-bestpair
+Job ID:     483412
+Node:       gnode02
+Partition:  stud
+Started:    Mon Apr 27 09:03:07 AM CEST 2026
+CWD:        /mnt/beegfsstudents/home/3202029/superclip-recon
+PROJECT:    /mnt/beegfsstudents/home/3202029/superclip-recon
+Python:     /usr/bin/python
+========================================
+[common.sh] Activated env: superclip (/home/3202029/.conda/envs/superclip/bin/python)
+=== Winoground: baseline s103 ===
+Device: cuda
+Loaded checkpoint: ./checkpoints/compositional_round2/compositional_baseline_varA_l0_s103_b128_e10/epoch_9.pt
+
+--- Winoground ---
+  [SKIP] Could not load Winoground: 403 Client Error. (Request ID: Root=1-69ef0a59-42964ec8345708984cd399c2;f38a0af6-5adc-4134-9e09-3458d0a344b7)
+
+Cannot access gated repo for url https://huggingface.co/datasets/facebook/winoground/resolve/b400e173549071916ad1b3d449293bc8d8b4b763/data/test-00000-of-00001.parquet.
+Access to dataset facebook/winoground is restricted and you are not in the authorized list. Visit https://huggingface.co/datasets/facebook/winoground to ask for access.
+
+=== Compositional Evaluation Summary ===
+
+Saved to ./results/winoground/baseline_s103_winoground.json
+=== Winoground: reconA l1 s103 ===
+Device: cuda
+Loaded checkpoint: ./checkpoints/compositional_round2/compositional_reconA_l1_s103_b128_e10/epoch_9.pt
+
+--- Winoground ---
+  [SKIP] Could not load Winoground: 403 Client Error. (Request ID: Root=1-69ef0a80-2bd31f524b1ae947677cc79d;34d36a39-f80f-4bae-94c1-859637b10370)
+
+Cannot access gated repo for url https://huggingface.co/datasets/facebook/winoground/resolve/b400e173549071916ad1b3d449293bc8d8b4b763/data/test-00000-of-00001.parquet.
+Access to dataset facebook/winoground is restricted and you are not in the authorized list. Visit https://huggingface.co/datasets/facebook/winoground to ask for access.
+
+=== Compositional Evaluation Summary ===
+
+Saved to ./results/winoground/reconA_l1_s103_winoground.json
+=== Winoground pair complete: Mon Apr 27 09:04:34 AM CEST 2026 ===

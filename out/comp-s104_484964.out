@@ -1,0 +1,21 @@
+[common.sh] PROJECT_ROOT=/mnt/beegfsstudents/home/3202029/superclip-recon
+========================================
+Job:        comp-s104
+Job ID:     484964
+Node:       gnode02
+Partition:  stud
+Started:    Wed Apr 29 09:50:03 AM CEST 2026
+CWD:        /mnt/beegfsstudents/home/3202029/superclip-recon
+PROJECT:    /mnt/beegfsstudents/home/3202029/superclip-recon
+Python:     /usr/bin/python
+========================================
+[common.sh] Activated env: superclip (/home/3202029/.conda/envs/superclip/bin/python)
+Device: cuda
+Loaded checkpoint: ./checkpoints/final_confirm/confirm_baseline_varA_l0_s104_b128_e10/epoch_9.pt
+
+--- ARO VG-Attribution ---
+  Loaded ARO VG-Attribution: 2000 examples
+  Accuracy: 61.3
+
+--- ARO VG-Relation ---
+  Loaded ARO VG-Relation: 2000 examples

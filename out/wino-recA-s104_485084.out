@@ -1,0 +1,16 @@
+Device: cuda
+Loaded checkpoint: ./checkpoints/final_confirm/confirm_reconA_l1_s104_b128_e10/epoch_9.pt
+
+--- Winoground ---
+  Loaded Winoground: 400 examples
+  Text:  31.5
+  Image: 11.0
+  Group: 7.8
+
+=== Compositional Evaluation Summary ===
+  winoground_text_score: 31.5
+  winoground_image_score: 11.0
+  winoground_group_score: 7.75
+  winoground_n: 400
+
+Saved to ./results/final_confirm/reconA_s104_l1_varA_winoground.json

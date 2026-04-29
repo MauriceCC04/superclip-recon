@@ -1,0 +1,107 @@
+[common.sh] PROJECT_ROOT=/mnt/beegfsstudents/home/3202029/superclip-recon
+========================================
+Job:        compositional-r2
+Job ID:     482981
+Node:       gnode02
+Partition:  stud
+Started:    Sun Apr 26 08:07:55 AM CEST 2026
+CWD:        /mnt/beegfsstudents/home/3202029/superclip-recon
+PROJECT:    /mnt/beegfsstudents/home/3202029/superclip-recon
+Python:     /usr/bin/python
+========================================
+[common.sh] Activated env: superclip (/home/3202029/.conda/envs/superclip/bin/python)
+==================================================
+ARO eval: baseline_confirm_s102_l0_varA
+Checkpoint dir: ./checkpoints/confirm6/confirm_baseline_varA_l0_s102_b128_e10
+Using checkpoint: ./checkpoints/confirm6/confirm_baseline_varA_l0_s102_b128_e10/epoch_9.pt
+==================================================
+Device: cuda
+Loaded checkpoint: ./checkpoints/confirm6/confirm_baseline_varA_l0_s102_b128_e10/epoch_9.pt
+
+--- ARO VG-Attribution ---
+  Loaded ARO VG-Attribution: 2000 examples
+  Accuracy: 60.5
+
+--- ARO VG-Relation ---
+  Loaded ARO VG-Relation: 2000 examples
+  Accuracy: 52.0
+
+=== Compositional Evaluation Summary ===
+  aro_vg_attribution_accuracy: 60.45
+  aro_vg_attribution_n: 2000
+  aro_vg_relation_accuracy: 51.95
+  aro_vg_relation_n: 2000
+
+Saved to ./results/compositional_round2/baseline_confirm_s102_l0_varA_aro.json
+==================================================
+ARO eval: reconA_confirm_s102_l1_varA
+Checkpoint dir: ./checkpoints/confirm6/confirm_reconA_l1_s102_b128_e10
+Using checkpoint: ./checkpoints/confirm6/confirm_reconA_l1_s102_b128_e10/epoch_9.pt
+==================================================
+Device: cuda
+Loaded checkpoint: ./checkpoints/confirm6/confirm_reconA_l1_s102_b128_e10/epoch_9.pt
+
+--- ARO VG-Attribution ---
+  Loaded ARO VG-Attribution: 2000 examples
+  Accuracy: 60.6
+
+--- ARO VG-Relation ---
+  Loaded ARO VG-Relation: 2000 examples
+  Accuracy: 51.5
+
+=== Compositional Evaluation Summary ===
+  aro_vg_attribution_accuracy: 60.65
+  aro_vg_attribution_n: 2000
+  aro_vg_relation_accuracy: 51.45
+  aro_vg_relation_n: 2000
+
+Saved to ./results/compositional_round2/reconA_confirm_s102_l1_varA_aro.json
+==================================================
+Training: compositional_baseline_varA_l0_s103_b128_e10
+train_mode=superclip_baseline lambda=0.0 seed=103
+==================================================
+[common.sh] PROJECT_ROOT=/mnt/beegfsstudents/home/3202029/superclip-recon
+========================================
+Job:        compositional-r2
+Job ID:     482981
+Node:       gnode02
+Partition:  stud
+Started:    Sun Apr 26 08:11:37 AM CEST 2026
+CWD:        /mnt/beegfsstudents/home/3202029/superclip-recon
+PROJECT:    /mnt/beegfsstudents/home/3202029/superclip-recon
+Python:     /home/3202029/.conda/envs/superclip/bin/python
+========================================
+[common.sh] Activated env: superclip (/home/3202029/.conda/envs/superclip/bin/python)
+Experiment config:
+  RUN_NAME=compositional_baseline_varA_l0_s103_b128_e10
+  TRAIN_MODE=superclip_baseline
+  VARIANT=A
+  LAMBDA_CLIP=1.0
+  LAMBDA_TOKEN_CLS=1.0
+  LAMBDA_RECON=0.0
+  MASK_RATIO=0.15
+  EPOCHS=10  BATCH=128  LR=1e-5
+  SEED=103  NUM_WORKERS=4  DETERMINISTIC=0
+  SAVE=last_and_best keep=1
+Device: cuda
+Run: compositional_baseline_varA_l0_s103_b128_e10 | requested_mode=superclip_baseline | effective_mode=superclip_baseline | requested_variant=A | effective_variant=baseline | lambda_clip=1.0 | lambda_tc=1.0 | lambda_recon=0.0 | mask_ratio=0.15
+Seed / loader: seed=103 | num_workers=4 | deterministic=False | amp=True
+Freeze flags: text=False | vision=False | logit_scale=False
+Checkpoint strategy: last_and_best | keep_last_k=1 | save_optimizer=False
+Reconstruction enabled: False
+Loaded vocab with 1000 token classes
+Param summary: {'clip_total': 151277313, 'clip_trainable': 151277313, 'token_cls_total': 513000, 'token_cls_trainable': 513000, 'recon_total': 25642496, 'recon_trainable': 0, 'model_total': 177432809, 'model_trainable': 151790313}
+[Dataset] Loaded 118287 images from ./data/coco/annotations/captions_train2017.json (stochastic caption selection)
+Scheduler: linear warmup for 500 steps, then linear decay over 9240 total steps
+First-step grad summary: {'clip_grad_norm': 323.0653268871829, 'token_cls_grad_norm': 0.11866864562034607, 'recon_grad_norm': 0.0}
+Epoch 1 avg losses: clip=0.4147  tc=6.8834  rc=0.0000  total=7.2982
+Saved checkpoint: ./checkpoints/compositional_round2/compositional_baseline_varA_l0_s103_b128_e10/epoch_1.pt (677.0 MB)
+Running retrieval evaluation (max_images=5000)...
+[Dataset] Loaded 5000 images from ./data/coco/annotations/captions_val2017.json (stochastic caption selection)
+  I->T R@1=55.26  R@5=79.20  R@10=87.46
+  T->I R@1=39.65  R@5=67.13  R@10=77.61
+  Retrieval score (R-sum@1/5/10 both directions): 406.31
+Epoch 2 avg losses: clip=0.3382  tc=6.7704  rc=0.0000  total=7.1086
+Saved checkpoint: ./checkpoints/compositional_round2/compositional_baseline_varA_l0_s103_b128_e10/epoch_2.pt (677.0 MB)
+Running retrieval evaluation (max_images=5000)...
+[Dataset] Loaded 5000 images from ./data/coco/annotations/captions_val2017.json (stochastic caption selection)

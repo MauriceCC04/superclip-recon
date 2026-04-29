@@ -1,0 +1,4 @@
+usage: eval_compositional.py [-h] --checkpoint CHECKPOINT
+                             [--benchmark {winoground,aro,all}]
+                             [--hf_token HF_TOKEN] [--output OUTPUT]
+eval_compositional.py: error: unrecognized arguments: --benchmarks aro

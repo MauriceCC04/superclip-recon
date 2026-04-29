@@ -1,0 +1,47 @@
+[common.sh] PROJECT_ROOT=/mnt/beegfsstudents/home/3202029/superclip-recon
+========================================
+Job:        winoground-bestpair
+Job ID:     483417
+Node:       gnode02
+Partition:  stud
+Started:    Mon Apr 27 09:17:14 AM CEST 2026
+CWD:        /mnt/beegfsstudents/home/3202029/superclip-recon
+PROJECT:    /mnt/beegfsstudents/home/3202029/superclip-recon
+Python:     /home/3202029/.conda/envs/superclip/bin/python
+========================================
+[common.sh] Activated env: superclip (/home/3202029/.conda/envs/superclip/bin/python)
+=== Winoground: baseline s103 ===
+Device: cuda
+Loaded checkpoint: ./checkpoints/compositional_round2/compositional_baseline_varA_l0_s103_b128_e10/epoch_9.pt
+
+--- Winoground ---
+  Loaded Winoground: 400 examples
+  Text:  33.0
+  Image: 10.0
+  Group: 7.5
+
+=== Compositional Evaluation Summary ===
+  winoground_text_score: 33.0
+  winoground_image_score: 10.0
+  winoground_group_score: 7.5
+  winoground_n: 400
+
+Saved to ./results/winoground/baseline_s103_winoground.json
+=== Winoground: reconA l1 s103 ===
+Device: cuda
+Loaded checkpoint: ./checkpoints/compositional_round2/compositional_reconA_l1_s103_b128_e10/epoch_9.pt
+
+--- Winoground ---
+  Loaded Winoground: 400 examples
+  Text:  34.5
+  Image: 11.5
+  Group: 8.5
+
+=== Compositional Evaluation Summary ===
+  winoground_text_score: 34.5
+  winoground_image_score: 11.5
+  winoground_group_score: 8.5
+  winoground_n: 400
+
+Saved to ./results/winoground/reconA_l1_s103_winoground.json
+=== Winoground pair complete: Mon Apr 27 09:19:39 AM CEST 2026 ===

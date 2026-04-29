@@ -1,0 +1,51 @@
+[common.sh] PROJECT_ROOT=/mnt/beegfsstudents/home/3202029/superclip-recon
+========================================
+Job:        compositional-pair
+Job ID:     482977
+Node:       gnode02
+Partition:  stud
+Started:    Sun Apr 26 07:27:52 AM CEST 2026
+CWD:        /mnt/beegfsstudents/home/3202029/superclip-recon
+PROJECT:    /mnt/beegfsstudents/home/3202029/superclip-recon
+Python:     /usr/bin/python
+========================================
+[common.sh] Activated env: superclip (/home/3202029/.conda/envs/superclip/bin/python)
+=== ARO probe: baseline s101 ===
+Device: cuda
+Loaded checkpoint: ./checkpoints/confirm6/confirm_baseline_varA_l0_s101_b128_e10/epoch_10.pt
+
+--- ARO VG-Attribution ---
+  Loaded ARO VG-Attribution: 2000 examples
+  Accuracy: 59.6
+
+--- ARO VG-Relation ---
+  Loaded ARO VG-Relation: 2000 examples
+  Accuracy: 50.9
+
+=== Compositional Evaluation Summary ===
+  aro_vg_attribution_accuracy: 59.6
+  aro_vg_attribution_n: 2000
+  aro_vg_relation_accuracy: 50.85
+  aro_vg_relation_n: 2000
+
+Saved to ./results/compositional/confirm_baseline_varA_l0_s101_b128_e10_aro.json
+=== ARO probe: reconA l1 s101 ===
+Device: cuda
+Loaded checkpoint: ./checkpoints/confirm6/confirm_reconA_l1_s101_b128_e10/epoch_10.pt
+
+--- ARO VG-Attribution ---
+  Loaded ARO VG-Attribution: 2000 examples
+  Accuracy: 61.0
+
+--- ARO VG-Relation ---
+  Loaded ARO VG-Relation: 2000 examples
+  Accuracy: 51.4
+
+=== Compositional Evaluation Summary ===
+  aro_vg_attribution_accuracy: 61.05
+  aro_vg_attribution_n: 2000
+  aro_vg_relation_accuracy: 51.35
+  aro_vg_relation_n: 2000
+
+Saved to ./results/compositional/confirm_reconA_l1_s101_b128_e10_aro.json
+=== Compositional pair eval complete: Sun Apr 26 07:34:36 AM CEST 2026 ===
