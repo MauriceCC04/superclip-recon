@@ -1,68 +1,66 @@
 # SuperCLIP-Recon
 
-SuperCLIP-Recon is a retrieval-first extension of CLIP built around the COCO Captions dataset.
+SuperCLIP-Recon is a CLIP-based image-text retrieval project built around the COCO Captions dataset.
 
-The project keeps the standard CLIP image-text contrastive objective as the main signal, then adds:
+The repository contains:
 
-- a **SuperCLIP-style token classification head** as the baseline extension
-- an optional **caption reconstruction head** as the main experimental improvement
+- a **baseline path** built around CLIP retrieval plus token classification
+- a **reconstruction path** that adds caption reconstruction
+- **Variant A** as the baseline anchor used throughout the project
+- **Variant B** as a phrase-reconstruction extension
 
-The repository is organized so that the main project components are already separated by responsibility:
+The project was run primarily on Bocconi HPC, and the repository reflects that workflow.
 
-- **Data processing**: `build_vocab.py`, `dataset.py`
-- **Model definition**: `model.py`
-- **Training**: `train.py`, `losses.py`, `slurm/run_one_experiment.sh`
-- **Evaluation**: `evaluate.py`, `eval_compositional.py`, `analyze_results.py`
-- **HPC / orchestration**: `slurm/`, `docs/HPC_RUNBOOK.md`, `docs/INCIDENTS.md`
+For anything about actually running, monitoring, recovering, or reproducing jobs on the cluster, use these two documents as the source of truth:
 
-For the Bocconi HPC workflow used during the project, see `docs/HPC_RUNBOOK.md`.
+- `docs/HPC_RUNBOOK.md`
+- `docs/INCIDENTS.md`
+
+Those two docs were updated from the real HPC stderr logs and document the actual operational behavior seen during the project, including cache warm-up, SLURM issues, checkpoint handling, quota failures, partial sequential jobs, and benign warnings.
 
 ---
 
-## Repository layout
+## What is in the repository
 
-```text
-.
-├── README.md
-├── REPRODUCIBILITY.md
-├── build_vocab.py              # build token-class vocab from COCO captions
-├── dataset.py                  # COCO caption dataset loader
-├── model.py                    # SuperCLIP-Recon model definition
-├── losses.py                   # training objectives and masking helpers
-├── train.py                    # main training entry point
-├── evaluate.py                 # COCO retrieval evaluation
-├── eval_compositional.py       # ARO / Winoground evaluation
-├── analyze_results.py          # plotting / summary helper
-├── scripts/
-│   ├── build_results_bundle.py # export tables + figures into results/
-│   └── reproduce_report.sh     # staged reproduction helper
-├── slurm/                      # HPC launchers used in the project report
-├── docs/
-│   ├── HPC_RUNBOOK.md
-│   └── INCIDENTS.md
-└── results/
-    ├── README.md
-    ├── figures/
-    ├── tables/
-    └── qualitative/
-```
+The code is already separated by role:
+
+- **Data processing**
+  - `build_vocab.py`
+  - `dataset.py`
+- **Model definition**
+  - `model.py`
+  - `config.py`
+- **Training**
+  - `train.py`
+  - `losses.py`
+  - `slurm/run_one_experiment.sh`
+- **Evaluation**
+  - `evaluate.py`
+  - `eval_compositional.py`
+  - `analyze_results.py`
+- **HPC orchestration**
+  - `slurm/`
+- **Operational documentation**
+  - `docs/HPC_RUNBOOK.md`
+  - `docs/INCIDENTS.md`
 
 ---
 
 ## Setup
 
-### Local Python setup
+### Python environment
+
+For package installation, use the dependency versions in:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
+The repo expects at least the packages listed in `requirements.txt`, including `torch`, `open_clip_torch`, `transformers`, `pycocotools`, `datasets`, and `matplotlib`.
+
 ### Data layout
 
-The code expects COCO 2017 captions and images in the following layout:
+The code expects COCO under:
 
 ```text
 data/coco/
@@ -73,23 +71,28 @@ data/coco/
 └── val2017/
 ```
 
-If `vocab.json` is missing, build it with:
+If `vocab.json` is missing, build it with the script already present in the repo:
 
 ```bash
 python build_vocab.py --coco_root ./data/coco --top_k 1000 --output vocab.json
 ```
 
-### HPC setup
+### HPC environment
 
-For the exact Bocconi HPC environment, conda activation, cache setup, and SLURM usage, follow:
+Do not rely on this README for the cluster setup details.
 
-- `docs/HPC_RUNBOOK.md`
+Use:
+
+- `docs/HPC_RUNBOOK.md` for environment setup, conda activation, cache locations, job submission, monitoring, recovery, and reproducibility rules
+- `docs/INCIDENTS.md` for the real failure modes encountered during the project and the decisions taken to handle them
 
 ---
 
-## Quick start
+## Main entry points
 
-### Train one run
+### Train one experiment
+
+The main training entry point is:
 
 ```bash
 python train.py \
@@ -107,7 +110,21 @@ python train.py \
   --results_file ./results/baseline.json
 ```
 
-### Evaluate a checkpoint on COCO retrieval
+For real HPC runs, the project normally goes through:
+
+```bash
+bash slurm/submit_main_experiments.sh
+```
+
+or directly through:
+
+```bash
+sbatch slurm/run_one_experiment.sh
+```
+
+with the required environment variables described in `docs/HPC_RUNBOOK.md`.
+
+### Evaluate COCO retrieval
 
 ```bash
 python evaluate.py --checkpoint ./checkpoints/baseline/epoch_10.pt --coco_root ./data/coco
@@ -122,53 +139,107 @@ python eval_compositional.py \
   --output ./results/compositional_baseline.json
 ```
 
-### Export figures and tables into `results/`
+The evaluator supports:
+
+- `--benchmark aro`
+- `--benchmark winoground`
+- `--benchmark all`
+
+The real logs showed that `--benchmarks` is wrong; the correct flag is singular: `--benchmark`.
+
+### Build summary plots and tables
 
 ```bash
 python scripts/build_results_bundle.py --results_dir ./results
 ```
 
-This writes derived artifacts to:
+This script uses the existing `analyze_results.py` utilities and writes derived artifacts into:
+
+- `results/figures/`
+- `results/tables/`
+
+It also creates `results/qualitative/` as the reserved place for qualitative report artifacts.
+
+---
+
+## Results layout
+
+The repository uses `results/` for raw outputs and report artifacts.
+
+Raw outputs from training / evaluation jobs appear in locations such as:
+
+- `results/confirm6/`
+- `results/final_checks/`
+- `results/compositional/`
+- `results/compositional_round2/`
+- `results/winoground/`
+
+Report-ready artifacts are kept separately in:
 
 - `results/figures/`
 - `results/tables/`
 - `results/qualitative/`
 
----
-
-## Reproducing the report experiments
-
-The repository includes a staged helper for the experiments used in the report:
-
-```bash
-bash scripts/reproduce_report.sh plan
-```
-
-This prints the recommended execution order.
-
-To run a specific stage on HPC:
-
-```bash
-bash scripts/reproduce_report.sh main
-bash scripts/reproduce_report.sh confirm6
-bash scripts/reproduce_report.sh ablations
-bash scripts/reproduce_report.sh compositional_core
-```
-
-For the full stage-by-stage description, expected outputs, and notes on optional Winoground runs, see:
-
-- `REPRODUCIBILITY.md`
+For the detailed folder convention, see `results/README.md`.
 
 ---
 
-## Results folder convention
+## HPC scripts that are actually present in the repository
 
-Raw experiment outputs are stored as JSON / JSONL files under `results/` and its experiment subfolders.
+The following project scripts are present and correspond to runs reflected in the stderr logs:
 
-Derived report artifacts are stored in a dedicated structure:
+### Main / training
 
-- `results/figures/` — plots used in the report
-- `results/tables/` — summary CSV tables
-- `results/qualitative/` — selected qualitative examples / notes
+- `slurm/submit_main_experiments.sh`
+- `slurm/run_one_experiment.sh`
+- `slurm/run_confirm6_sequential.sh`
+- `slurm/run_maskrate_l1_seed102.sh`
+- `slurm/run_variantB_seed104_check.sh`
 
-This keeps raw experiment outputs separate from report-ready artifacts.
+### Compositional / evaluation
+
+- `slurm/run_compositional_confirm_pair.sh`
+- `slurm/run_compositional_round2.sh`
+- `slurm/run_winoground_bestpair.sh`
+
+### Analysis / reporting
+
+- `scripts/build_results_bundle.py`
+- `analyze_results.py`
+
+This README intentionally does **not** claim more than that.
+
+---
+
+## What the stderr logs showed in practice
+
+The attached HPC error logs and the runbook/incidents docs reinforce a few practical rules:
+
+- monitor training progress in `err/` first, because `tqdm` and warnings often write there
+- for sequential wrappers, also check `out/` and `logs/`
+- the first ARO or Winoground evaluation may spend real time downloading datasets or building cache before steady-state example progress appears
+- `fatal: not a git repository` at the end of a completed run is usually benign on the HPC copy, because `.git` is intentionally excluded from normal syncs
+- `SIGNAL Terminated` on a long sequential batch does **not** necessarily mean the whole batch failed; some subruns may already be valid and worth keeping
+- if `slurm/run_one_experiment.sh` is used directly, `RUN_NAME`, `VARIANT`, `LAMBDA_RECON`, and `MASK_RATIO` must be set
+
+All of that is documented in more detail in:
+
+- `docs/HPC_RUNBOOK.md`
+- `docs/INCIDENTS.md`
+
+---
+
+## Reproducibility note
+
+This repository contains the code and several real HPC launchers used during the project.
+
+However, the authoritative instructions for reproducing the project workflow are in the HPC runbook, because that is where the real cluster constraints, job patterns, cache behavior, output paths, and recovery rules are documented.
+
+If you want to reproduce the project from the repository:
+
+1. set up the data and `vocab.json`
+2. follow `docs/HPC_RUNBOOK.md` for environment and submission
+3. use the real scripts listed above
+4. use `scripts/build_results_bundle.py` to generate tables and plots from the resulting JSON outputs
+
+That is the current, grounded path supported by the repository as it exists now.
