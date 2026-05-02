@@ -1,0 +1,281 @@
+{
+  "run_name": "confirm_reconA_l1_s105_b128_e10",
+  "requested_train_mode": "superclip_recon",
+  "train_mode": "superclip_recon",
+  "variant": "A",
+  "effective_variant": "A",
+  "recon_enabled": true,
+  "lambda_clip": 1.0,
+  "lambda_token_cls": 1.0,
+  "lambda_recon": 1.0,
+  "mask_ratio": 0.15,
+  "lr": 1e-05,
+  "batch_size": 128,
+  "epochs": 10,
+  "seed": 105,
+  "num_workers": 4,
+  "deterministic": false,
+  "amp_enabled": true,
+  "wall_time_seconds": 3695.0,
+  "trainable_params": 177432809,
+  "param_summary": {
+    "clip_total": 151277313,
+    "clip_trainable": 151277313,
+    "token_cls_total": 513000,
+    "token_cls_trainable": 513000,
+    "recon_total": 25642496,
+    "recon_trainable": 25642496,
+    "model_total": 177432809,
+    "model_trainable": 177432809
+  },
+  "first_step_grad_summary": {
+    "clip_grad_norm": 347.49189420975745,
+    "token_cls_grad_norm": 0.1131935603916645,
+    "recon_grad_norm": 1.1367421764880419
+  },
+  "save_strategy": "last_and_best",
+  "checkpoint_size_mb": 677.0,
+  "best_epoch": 10,
+  "best_retrieval_score": 446.028,
+  "best_retrieval": {
+    "i2t_r1": 62.9,
+    "t2i_r1": 46.872,
+    "i2t_r5": 85.94000000000001,
+    "t2i_r5": 74.544,
+    "i2t_r10": 92.10000000000001,
+    "t2i_r10": 83.672
+  },
+  "hostname": "gnode02",
+  "git_commit": null,
+  "argv": [
+    "train.py",
+    "--coco_root",
+    "./data/coco",
+    "--vocab_path",
+    "./vocab.json",
+    "--run_name",
+    "confirm_reconA_l1_s105_b128_e10",
+    "--train_mode",
+    "superclip_recon",
+    "--variant",
+    "A",
+    "--lambda_clip",
+    "1.0",
+    "--lambda_token_cls",
+    "1.0",
+    "--lambda_recon",
+    "1.0",
+    "--mask_ratio",
+    "0.15",
+    "--epochs",
+    "10",
+    "--batch_size",
+    "128",
+    "--lr",
+    "1e-5",
+    "--eval_max_images",
+    "5000",
+    "--save_strategy",
+    "last_and_best",
+    "--keep_last_k",
+    "1",
+    "--save_dir",
+    "./checkpoints/final_confirm/confirm_reconA_l1_s105_b128_e10",
+    "--results_file",
+    "./results/final_confirm/confirm_reconA_l1_s105_b128_e10.json",
+    "--seed",
+    "105",
+    "--num_workers",
+    "4"
+  ],
+  "history": [
+    {
+      "epoch": 1,
+      "losses": {
+        "l_clip": 0.41740572284826466,
+        "l_token_cls": 6.872982276982559,
+        "l_recon": 10.11711858877372,
+        "l_total": 17.407506578412406
+      },
+      "retrieval": {
+        "i2t_r1": 53.080000000000005,
+        "t2i_r1": 40.967999999999996,
+        "i2t_r5": 79.16,
+        "t2i_r5": 68.368,
+        "i2t_r10": 86.52,
+        "t2i_r10": 78.51599999999999
+      },
+      "retrieval_score": 406.61199999999997
+    },
+    {
+      "epoch": 2,
+      "losses": {
+        "l_clip": 0.34011812835480226,
+        "l_token_cls": 6.74007980286817,
+        "l_recon": 6.32531201013755,
+        "l_total": 13.405509914670672
+      },
+      "retrieval": {
+        "i2t_r1": 55.50000000000001,
+        "t2i_r1": 41.892,
+        "i2t_r5": 81.56,
+        "t2i_r5": 69.72,
+        "i2t_r10": 88.72,
+        "t2i_r10": 79.928
+      },
+      "retrieval_score": 417.32
+    },
+    {
+      "epoch": 3,
+      "losses": {
+        "l_clip": 0.28660350867035067,
+        "l_token_cls": 6.648813955711596,
+        "l_recon": 5.745610644290974,
+        "l_total": 12.681028141087785
+      },
+      "retrieval": {
+        "i2t_r1": 57.42,
+        "t2i_r1": 42.071999999999996,
+        "i2t_r5": 80.72,
+        "t2i_r5": 70.036,
+        "i2t_r10": 88.12,
+        "t2i_r10": 79.97999999999999
+      },
+      "retrieval_score": 418.348
+    },
+    {
+      "epoch": 4,
+      "losses": {
+        "l_clip": 0.24971981074064326,
+        "l_token_cls": 6.582532942553104,
+        "l_recon": 5.6820762054228675,
+        "l_total": 12.514328949379198
+      },
+      "retrieval": {
+        "i2t_r1": 58.08,
+        "t2i_r1": 43.552,
+        "i2t_r5": 82.54,
+        "t2i_r5": 71.26400000000001,
+        "i2t_r10": 89.92,
+        "t2i_r10": 81.136
+      },
+      "retrieval_score": 426.492
+    },
+    {
+      "epoch": 5,
+      "losses": {
+        "l_clip": 0.22535883439341922,
+        "l_token_cls": 6.532180045590256,
+        "l_recon": 5.633662027714056,
+        "l_total": 12.391200884080037
+      },
+      "retrieval": {
+        "i2t_r1": 59.36,
+        "t2i_r1": 44.292,
+        "i2t_r5": 84.16,
+        "t2i_r5": 72.596,
+        "i2t_r10": 90.96,
+        "t2i_r10": 81.86
+      },
+      "retrieval_score": 433.228
+    },
+    {
+      "epoch": 6,
+      "losses": {
+        "l_clip": 0.20373844165048557,
+        "l_token_cls": 6.495086195665005,
+        "l_recon": 5.639525046080222,
+        "l_total": 12.338349670558781
+      },
+      "retrieval": {
+        "i2t_r1": 59.56,
+        "t2i_r1": 44.996,
+        "i2t_r5": 83.94,
+        "t2i_r5": 73.028,
+        "i2t_r10": 90.78,
+        "t2i_r10": 82.512
+      },
+      "retrieval_score": 434.81600000000003
+    },
+    {
+      "epoch": 7,
+      "losses": {
+        "l_clip": 0.18361561673640947,
+        "l_token_cls": 6.467776498237214,
+        "l_recon": 5.636246892796966,
+        "l_total": 12.28763901206838
+      },
+      "retrieval": {
+        "i2t_r1": 60.699999999999996,
+        "t2i_r1": 45.488,
+        "i2t_r5": 83.98,
+        "t2i_r5": 73.184,
+        "i2t_r10": 91.42,
+        "t2i_r10": 82.824
+      },
+      "retrieval_score": 437.596
+    },
+    {
+      "epoch": 8,
+      "losses": {
+        "l_clip": 0.16730781801012687,
+        "l_token_cls": 6.448956471500975,
+        "l_recon": 5.6316572747705305,
+        "l_total": 12.247921563846209
+      },
+      "retrieval": {
+        "i2t_r1": 61.88,
+        "t2i_r1": 46.18,
+        "i2t_r5": 84.89999999999999,
+        "t2i_r5": 74.16,
+        "i2t_r10": 91.25999999999999,
+        "t2i_r10": 83.316
+      },
+      "retrieval_score": 441.69599999999997
+    },
+    {
+      "epoch": 9,
+      "losses": {
+        "l_clip": 0.1535945660172603,
+        "l_token_cls": 6.437137467520578,
+        "l_recon": 5.627322364679147,
+        "l_total": 12.218054417407874
+      },
+      "retrieval": {
+        "i2t_r1": 62.419999999999995,
+        "t2i_r1": 46.56,
+        "i2t_r5": 85.86,
+        "t2i_r5": 74.356,
+        "i2t_r10": 91.66,
+        "t2i_r10": 83.65599999999999
+      },
+      "retrieval_score": 444.512
+    },
+    {
+      "epoch": 10,
+      "losses": {
+        "l_clip": 0.14722333805337226,
+        "l_token_cls": 6.430677573918264,
+        "l_recon": 5.625286753559525,
+        "l_total": 12.203187663833816
+      },
+      "retrieval": {
+        "i2t_r1": 62.9,
+        "t2i_r1": 46.872,
+        "i2t_r5": 85.94000000000001,
+        "t2i_r5": 74.544,
+        "i2t_r10": 92.10000000000001,
+        "t2i_r10": 83.672
+      },
+      "retrieval_score": 446.028
+    }
+  ],
+  "final_retrieval": {
+    "i2t_r1": 62.9,
+    "t2i_r1": 46.872,
+    "i2t_r5": 85.94000000000001,
+    "t2i_r5": 74.544,
+    "i2t_r10": 92.10000000000001,
+    "t2i_r10": 83.672
+  }
+}
