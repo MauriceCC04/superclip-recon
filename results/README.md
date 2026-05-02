@@ -26,8 +26,6 @@ These files are the reproducibility layer and should be kept separate from the r
 This repository reserves the following subfolders for presentation artifacts:
 
 - `results/figures/` — plots for the report
-- `results/tables/` — summary CSV tables
-- `results/qualitative/` — qualitative examples, notes, and failure cases
 
 To build the figures and tables from existing raw JSON results, run:
 
